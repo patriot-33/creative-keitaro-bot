@@ -667,19 +667,32 @@ class ReportsService:
             Топ-5 креативов отсортированных по выбранному критерию
         """
         
+        logger.info(f"=== REPORTS SERVICE DEBUG ===")
+        logger.info(f"get_creatives_report called with: period={period}, buyer_id={buyer_id}, geo={geo}, traffic_source={traffic_source}, sort_by={sort_by}")
+        
         # Конвертируем период
         period_enum = self._period_to_enum(period)
         custom_dates = self._get_custom_dates(period)
+        
+        logger.info(f"Period converted: {period} -> {period_enum}")
+        if custom_dates:
+            logger.info(f"Custom dates: {custom_dates[0]} - {custom_dates[1]}")
+        else:
+            logger.info(f"Using enum period: {period_enum}")
         
         # Определяем источники трафика
         traffic_source_ids = None
         if traffic_source:
             traffic_source_ids = await self._get_traffic_source_filter(traffic_source)
+            logger.info(f"Traffic source {traffic_source} -> IDs: {traffic_source_ids}")
         
         try:
             async with KeitaroClient() as client:
+                logger.info(f"Calling Keitaro client...")
+                
                 # Получаем данные по креативам
                 if custom_dates:
+                    logger.info(f"Using CUSTOM period with dates: {custom_dates[0]} - {custom_dates[1]}")
                     creatives_data = await client.get_creatives_report(
                         period=ReportPeriod.CUSTOM,
                         buyer_id=buyer_id if buyer_id != "all" else None,
@@ -689,6 +702,7 @@ class ReportsService:
                         custom_end=custom_dates[1]
                     )
                 else:
+                    logger.info(f"Using enum period: {period_enum}")
                     creatives_data = await client.get_creatives_report(
                         period=period_enum,
                         buyer_id=buyer_id if buyer_id != "all" else None,
@@ -696,16 +710,35 @@ class ReportsService:
                         traffic_source_ids=traffic_source_ids
                     )
                 
+                logger.info(f"Keitaro client returned {len(creatives_data)} creatives")
+                
                 if not creatives_data:
+                    logger.info("No creatives data returned from client")
                     return []
                 
+                # Log TR36 before sorting
+                tr36_before = next((c for c in creatives_data if c['creative_id'] == 'TR36'), None)
+                if tr36_before:
+                    logger.info(f"TR36 before sorting: revenue=${tr36_before['revenue']}, uepc=${tr36_before['uepc']:.2f}")
+                else:
+                    logger.info("TR36 not found before sorting")
+                    # Log some creative IDs for debugging
+                    sample_ids = [c['creative_id'] for c in creatives_data[:10]]
+                    logger.info(f"Sample creative IDs (first 10): {sample_ids}")
+                
                 # Сортируем по выбранному критерию
+                logger.info(f"Sorting by: {sort_by}")
                 if sort_by == "uepc":
                     creatives_data.sort(key=lambda x: x['uepc'], reverse=True)
                 elif sort_by == "revenue":
                     creatives_data.sort(key=lambda x: x['revenue'], reverse=True)
                 elif sort_by == "active_days":
                     creatives_data.sort(key=lambda x: x['active_days'], reverse=True)
+                
+                # Log top 5 after sorting
+                logger.info(f"Top 5 after sorting by {sort_by}:")
+                for i, creative in enumerate(creatives_data[:5]):
+                    logger.info(f"  {i+1}. {creative['creative_id']}: {sort_by}={creative.get(sort_by, 'N/A')}, revenue=${creative['revenue']}")
                 
                 # Возвращаем топ-5
                 return creatives_data[:5]

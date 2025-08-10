@@ -795,16 +795,43 @@ async def cmd_export(message: Message):
 @router.callback_query(F.data.startswith("period_creatives_"))
 async def handle_creatives_period_selection(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора периода для отчета по креативам"""
+    logger.info(f"=== CALLBACK PARSING DEBUG ===")
+    logger.info(f"Raw callback data: {callback.data}")
+    
     parts = callback.data.split("_")
+    logger.info(f"Split parts: {parts}")
     
     # Извлекаем период и источник трафика
-    if len(parts) >= 3:
+    # Формат: period_creatives_fb_yesterday или period_creatives_yesterday
+    if len(parts) >= 4:
+        # Новый формат: period_creatives_traffic_source_period
+        traffic_source = parts[2]
+        period = parts[3]
+        logger.info(f"4+ parts format: traffic_source={traffic_source}, period={period}")
+        
+        # Валидация traffic_source
+        if traffic_source not in ["google", "fb"]:
+            logger.warning(f"Invalid traffic_source in creatives: {traffic_source}, falling back to None")
+            traffic_source = None
+            period = parts[2]  # Если источник неверный, используем как период
+            logger.info(f"After validation: traffic_source={traffic_source}, period={period}")
+    elif len(parts) >= 3:
+        # Старый формат: period_creatives_period
         period = parts[2]
-        # Источник трафика может быть после периода
-        traffic_source = parts[3] if len(parts) > 3 else None
+        traffic_source = None
+        logger.info(f"3 parts format: traffic_source=None, period={period}")
     else:
+        logger.error(f"Invalid callback format: {callback.data}")
         await callback.answer("❌ Некорректные данные")
         return
+    
+    # Валидация периода
+    valid_periods = ["today", "yesterday", "last3days", "last7days", "last15days", "thismonth", "lastmonth"]
+    if period not in valid_periods:
+        logger.warning(f"Invalid period in creatives: {period}, falling back to yesterday")
+        period = "yesterday"
+    
+    logger.info(f"Final parsed values: traffic_source={traffic_source}, period={period}")
     
     await state.set_state(ReportsStates.filters_selection)
     await state.update_data(
@@ -865,7 +892,11 @@ async def handle_creatives_buyer_selection(callback: CallbackQuery, state: FSMCo
         return
     
     action = parts[2]  # all или select
-    period = parts[3]
+    # Получаем реальный период из state, а не из callback
+    user_data = await state.get_data()
+    period = user_data.get("period", "yesterday")
+    
+    logger.info(f"creo_buyer handler: action={action}, period_from_state={period}, callback={callback.data}")
     
     if action == "select":
         # Показываем список байеров для выбора
@@ -880,10 +911,18 @@ async def handle_creatives_buyer_selection(callback: CallbackQuery, state: FSMCo
             buyers_data = await reports_service.get_buyers_report(period, "all", None, traffic_source)
             
             if not buyers_data:
+                # Получаем traffic_source для правильного callback
+                user_data = await state.get_data()
+                traffic_source = user_data.get("traffic_source")
+                if traffic_source:
+                    back_callback = f"period_creatives_{traffic_source}_{period}"
+                else:
+                    back_callback = f"period_creatives_{period}"
+                    
                 await callback.message.edit_text(
                     f"❌ Нет данных по байерам за период: {format_period_name(period)}",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                        InlineKeyboardButton(text="↩️ Назад", callback_data=f"period_creatives_{period}")
+                        InlineKeyboardButton(text="↩️ Назад", callback_data=back_callback)
                     ]])
                 )
                 return
@@ -933,7 +972,11 @@ async def handle_creatives_set_buyer(callback: CallbackQuery, state: FSMContext)
         return
     
     buyer_id = parts[2]
-    period = parts[3]
+    # Получаем реальный период из state, а не из callback
+    user_data = await state.get_data()
+    period = user_data.get("period", "yesterday")
+    
+    logger.info(f"creo_setbuyer handler: buyer_id={buyer_id}, period_from_state={period}, callback={callback.data}")
     
     await state.update_data(buyer_id=buyer_id)
     await show_creatives_geo_selection(callback, state, period)
@@ -991,7 +1034,11 @@ async def handle_creatives_geo_selection(callback: CallbackQuery, state: FSMCont
         return
     
     action = parts[2]  # all или select
-    period = parts[3]
+    # Получаем реальный период из state, а не из callback
+    user_data = await state.get_data()
+    period = user_data.get("period", "yesterday")
+    
+    logger.info(f"creo_geo handler: action={action}, period_from_state={period}, callback={callback.data}")
     
     if action == "select":
         # Показываем список гео для выбора
@@ -1047,7 +1094,11 @@ async def handle_creatives_set_geo(callback: CallbackQuery, state: FSMContext):
         return
     
     geo = parts[2]
-    period = parts[3]
+    # Получаем реальный период из state, а не из callback
+    user_data = await state.get_data()
+    period = user_data.get("period", "yesterday")
+    
+    logger.info(f"creo_setgeo handler: geo={geo}, period_from_state={period}, callback={callback.data}")
     
     await state.update_data(geo=geo)
     await show_creatives_metric_selection(callback, state, period)
@@ -1118,7 +1169,11 @@ async def handle_creatives_show_report(callback: CallbackQuery, state: FSMContex
         return
     
     metric = parts[2]  # uepc, revenue, active
-    period = parts[3]
+    # Получаем реальный период из state, а не из callback
+    user_data = await state.get_data()
+    period = user_data.get("period", "yesterday")
+    
+    logger.info(f"creo_show handler: metric={metric}, period_from_state={period}, callback={callback.data}")
     
     # Сохраняем метрику для возможности пересортировки
     await state.update_data(current_metric=metric)
@@ -1138,6 +1193,14 @@ async def show_creatives_report(callback: CallbackQuery, state: FSMContext, peri
         geo = user_data.get("geo", "all")
         traffic_source = user_data.get("traffic_source")
         
+        # Детальное логирование
+        logger.info(f"=== CREATIVES REPORT DEBUG ===")
+        logger.info(f"Callback data: {callback.data}")
+        logger.info(f"Period from callback: {period}")
+        logger.info(f"Sort by: {sort_by}")
+        logger.info(f"User data: {user_data}")
+        logger.info(f"Final parameters: period={period}, buyer_id={buyer_id}, geo={geo}, traffic_source={traffic_source}")
+        
         # Получаем данные
         reports_service = ReportsService()
         creatives_data = await reports_service.get_creatives_report(
@@ -1148,11 +1211,30 @@ async def show_creatives_report(callback: CallbackQuery, state: FSMContext, peri
             sort_by=sort_by
         )
         
+        logger.info(f"Received {len(creatives_data)} creatives from service")
+        # Log TR36 if found
+        tr36 = next((c for c in creatives_data if c['creative_id'] == 'TR36'), None)
+        if tr36:
+            logger.info(f"TR36 found: revenue=${tr36['revenue']}, unique_clicks={tr36['unique_clicks']}, sort_metric={tr36.get(sort_by, 'N/A')}")
+        else:
+            logger.info(f"TR36 not found in {len(creatives_data)} creatives")
+            # Log first 5 creative IDs for debugging
+            creative_ids = [c['creative_id'] for c in creatives_data[:5]]
+            logger.info(f"First 5 creative IDs: {creative_ids}")
+        
         if not creatives_data:
+            # Используем правильный формат callback для кнопки Назад
+            user_data = await state.get_data()
+            traffic_source = user_data.get("traffic_source")
+            if traffic_source:
+                back_callback = f"period_creatives_{traffic_source}_{period}"
+            else:
+                back_callback = f"period_creatives_{period}"
+                
             await callback.message.edit_text(
                 f"❌ Нет данных по креативам за выбранный период",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="↩️ Назад", callback_data=f"creo_geo_all_{period}")
+                    InlineKeyboardButton(text="↩️ Назад", callback_data=back_callback)
                 ]])
             )
             return
@@ -1215,9 +1297,16 @@ async def show_creatives_report(callback: CallbackQuery, state: FSMContext, peri
                 )
             ])
         
-        # Кнопка назад
+        # Кнопка назад (используем правильный формат с traffic_source)
+        user_data = await state.get_data()
+        traffic_source = user_data.get("traffic_source")
+        if traffic_source:
+            back_callback = f"period_creatives_{traffic_source}_{period}"
+        else:
+            back_callback = f"period_creatives_{period}"
+        
         keyboard_buttons.append([
-            InlineKeyboardButton(text="↩️ Изменить фильтры", callback_data=f"period_creatives_{period}")
+            InlineKeyboardButton(text="↩️ Изменить фильтры", callback_data=back_callback)
         ])
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
@@ -1229,7 +1318,7 @@ async def show_creatives_report(callback: CallbackQuery, state: FSMContext, peri
         await callback.message.edit_text(
             "❌ Ошибка при генерации отчета",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="↩️ Назад", callback_data=f"period_creatives_{period}")
+                InlineKeyboardButton(text="↩️ Назад", callback_data=back_callback)
             ]])
         )
 
@@ -1244,7 +1333,11 @@ async def handle_creatives_resort(callback: CallbackQuery, state: FSMContext):
         return
     
     metric = parts[2]  # uepc, revenue, active
-    period = parts[3]
+    # Получаем реальный период из state, а не из callback
+    user_data = await state.get_data()
+    period = user_data.get("period", "yesterday")
+    
+    logger.info(f"creo_resort handler: metric={metric}, period_from_state={period}, callback={callback.data}")
     
     # Показываем отчет с новой сортировкой
     await show_creatives_report(callback, state, period, metric)
