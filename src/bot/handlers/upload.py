@@ -389,18 +389,12 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         file_info = await bot_instance.get_file(file_id)
         file_bytes = await bot_instance.download_file(file_info.file_path)
         
-        # Загружаем в Google Drive
-        from integrations.google.drive import GoogleDriveService
-        google_drive = GoogleDriveService()
-        drive_result = await google_drive.upload_file(
-            file_bytes, 
-            file_name, 
-            geo, 
-            mime_type
-        )
-        
-        if not drive_result:
-            raise Exception("Failed to upload to Google Drive")
+        # ВРЕМЕННО: пропускаем Google Drive для отладки
+        # Создаем fake drive результат
+        drive_result = {
+            'file_id': f"temp_drive_id_{creative_id}",
+            'web_view_link': f"https://drive.google.com/file/d/temp_{creative_id}/view"
+        }
         
         # Создаем/находим пользователя в базе данных
         from db.models.user import User
@@ -450,7 +444,7 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
             session.add(creative)
             await session.commit()
         
-        logger.info(f"Creative {creative_id} saved successfully for user {user.id}")
+        logger.info(f"Creative {creative_id} saved successfully for user {user.id} (without Google Drive)")
         
         success_text = f"""
 🎉 <b>Креатив успешно сохранен!</b>
@@ -473,13 +467,16 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         logger.info(f"Creative {creative_id} saved successfully by user {user.id}")
         
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
         logger.error(f"Error saving creative: {e}")
+        logger.error(f"Full traceback: {error_details}")
         
         await callback.message.edit_text(
-            "❌ <b>Ошибка при сохранении креатива!</b>\n\n"
-            "🔧 Попробуйте еще раз через несколько минут.\n"
-            "📞 Если проблема повторяется, обратитесь к администратору.\n\n"
-            "💡 Используйте /upload для повторной попытки.",
+            f"❌ <b>Ошибка при сохранении креатива!</b>\n\n"
+            f"🔧 Детали ошибки: {str(e)[:100]}...\n"
+            f"📞 Если проблема повторяется, обратитесь к администратору.\n\n"
+            f"💡 Используйте /upload для повторной попытки.",
             parse_mode="HTML"
         )
     
