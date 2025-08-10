@@ -694,6 +694,72 @@ async def cmd_my_creos(message: Message):
     await message.answer(response, parse_mode="HTML", disable_web_page_preview=True)
 
 
+@router.message(lambda message: message.text and message.text.startswith("/get_"))
+async def handle_get_creative(message: Message):
+    """Получение файла креатива по ID"""
+    from bot.services.creatives import CreativesService
+    from integrations.telegram.storage import TelegramStorageService
+    
+    # Извлекаем creative_id из команды
+    creative_id = message.text.replace("/get_", "").upper()
+    
+    # Получаем креатив из БД
+    creative = await CreativesService.get_creative_by_id(creative_id)
+    
+    if not creative:
+        await message.answer(
+            f"❌ Креатив с ID <code>{creative_id}</code> не найден.\n\n"
+            f"Проверьте правильность ID или используйте /my_creos для просмотра ваших креативов.",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Проверяем доступ (креатив принадлежит пользователю или пользователь имеет права)
+    user_id = message.from_user.id
+    if creative.uploader.tg_user_id != user_id:
+        # Здесь можно добавить проверку прав доступа для админов/менеджеров
+        await message.answer(
+            "❌ У вас нет доступа к этому креативу.",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Проверяем, что у креатива есть Telegram file_id
+    if not creative.telegram_file_id or creative.telegram_file_id.startswith('temp_'):
+        await message.answer(
+            f"❌ Файл креатива недоступен.\n\n"
+            f"Этот креатив был загружен до перехода на Telegram хранилище.",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Отправляем файл пользователю
+    try:
+        caption = f"""🎨 <b>{creative.creative_id}</b>
+🌍 GEO: {creative.geo}
+📝 Файл: {creative.original_name or 'Неизвестно'}
+📊 Размер: {round(creative.size_bytes / (1024 * 1024), 1) if creative.size_bytes else 0} MB
+📅 Загружен: {creative.upload_dt.strftime("%d.%m.%Y %H:%M") if creative.upload_dt else 'Неизвестно'}"""
+        
+        if creative.notes:
+            caption += f"\n💬 Описание: {creative.notes}"
+        
+        # Отправляем файл используя telegram_file_id
+        await message.answer_document(
+            document=creative.telegram_file_id,
+            caption=caption,
+            parse_mode="HTML"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error sending creative file: {e}")
+        await message.answer(
+            "❌ Ошибка при отправке файла.\n\n"
+            "Попробуйте еще раз позже.",
+            parse_mode="HTML"
+        )
+
+
 @router.message(Command("stats_buyer"))
 async def cmd_stats_buyer(message: Message):
     """Статистика по байерам"""
