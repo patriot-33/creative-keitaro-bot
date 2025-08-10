@@ -63,7 +63,7 @@ SUPPORTED_GEOS = [
 ]
 
 # Файл для хранения пользовательских ГЕО
-CUSTOM_GEOS_FILE = "custom_geos.json"
+CUSTOM_GEOS_FILE = "data/custom_geos.json"
 
 # Поддерживаемые типы файлов
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.mp4', '.mov', '.gif', '.webp'}
@@ -384,8 +384,73 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("⏳ <b>Сохраняем креатив...</b>", parse_mode="HTML")
     
     try:
-        # Здесь будет сохранение в базу данных и файловые системы
-        # Пока что симулируем успешное сохранение
+        # Скачиваем файл с Telegram
+        bot_instance = callback.bot
+        file_info = await bot_instance.get_file(file_id)
+        file_bytes = await bot_instance.download_file(file_info.file_path)
+        
+        # Загружаем в Google Drive
+        from integrations.google.drive import GoogleDriveService
+        google_drive = GoogleDriveService()
+        drive_result = await google_drive.upload_file(
+            file_bytes, 
+            file_name, 
+            geo, 
+            mime_type
+        )
+        
+        if not drive_result:
+            raise Exception("Failed to upload to Google Drive")
+        
+        # Создаем/находим пользователя в базе данных
+        from db.models.user import User
+        from db.models.creative import Creative
+        from db.database import get_db_session
+        from sqlalchemy import select
+        import hashlib
+        
+        # Рассчитываем hash файла
+        sha256_hash = hashlib.sha256(file_bytes).hexdigest()
+        
+        async with get_db_session() as session:
+            # Ищем или создаем пользователя
+            user_stmt = select(User).where(User.telegram_user_id == user.id)
+            db_user = await session.execute(user_stmt)
+            db_user = db_user.scalar_one_or_none()
+            
+            if not db_user:
+                # Создаем нового пользователя
+                db_user = User(
+                    telegram_user_id=user.id,
+                    username=user.username,
+                    first_name=user.first_name,
+                    last_name=user.last_name,
+                    role='owner'  # или из settings.allowed_users
+                )
+                session.add(db_user)
+                await session.flush()  # Получаем ID
+            
+            # Создаем запись о креативе
+            creative = Creative(
+                creative_id=creative_id,
+                geo=geo,
+                drive_file_id=drive_result['file_id'],
+                drive_link=drive_result['web_view_link'],
+                uploader_user_id=db_user.id,
+                uploader_buyer_id=buyer_id or None,
+                original_name=file_name,
+                ext=file_name.split('.')[-1].lower() if '.' in file_name else None,
+                mime_type=mime_type,
+                size_bytes=file_size,
+                sha256=sha256_hash,
+                upload_dt=datetime.utcnow(),
+                notes=notes or None
+            )
+            
+            session.add(creative)
+            await session.commit()
+        
+        logger.info(f"Creative {creative_id} saved successfully for user {user.id}")
         
         success_text = f"""
 🎉 <b>Креатив успешно сохранен!</b>
