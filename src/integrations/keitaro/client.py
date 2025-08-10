@@ -125,7 +125,8 @@ class KeitaroClient:
                     start_date = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
                     end_date = now.strftime('%Y-%m-%d 23:59:59')
                 elif period == ReportPeriod.LAST_7D:
-                    start_date = (now - timedelta(days=7)).strftime('%Y-%m-%d 00:00:00')
+                    # Последние 7 дней включая сегодня (6 дней назад + сегодня = 7 дней)
+                    start_date = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
                     end_date = now.strftime('%Y-%m-%d 23:59:59')
                 elif period == ReportPeriod.LAST_30D:
                     start_date = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
@@ -437,7 +438,8 @@ class KeitaroClient:
                     start_date = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
                     end_date = now.strftime('%Y-%m-%d 23:59:59')
                 elif period == ReportPeriod.LAST_7D:
-                    start_date = (now - timedelta(days=7)).strftime('%Y-%m-%d 00:00:00')
+                    # Последние 7 дней включая сегодня (6 дней назад + сегодня = 7 дней)
+                    start_date = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
                     end_date = now.strftime('%Y-%m-%d 23:59:59')
                 elif period == ReportPeriod.LAST_30D:
                     start_date = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
@@ -633,7 +635,8 @@ class KeitaroClient:
                         start_date = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
                         end_date = now.strftime('%Y-%m-%d %H:%M:%S')
                     elif period == ReportPeriod.LAST_7D:
-                        start_date = (now - timedelta(days=7)).strftime('%Y-%m-%d 00:00:00')
+                        # Последние 7 дней включая сегодня (6 дней назад + сегодня = 7 дней)
+                        start_date = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
                         end_date = now.strftime('%Y-%m-%d 23:59:59')
                     elif period == ReportPeriod.LAST_30D:
                         start_date = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
@@ -770,7 +773,8 @@ class KeitaroClient:
                         start_date = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
                         end_date = now.strftime('%Y-%m-%d %H:%M:%S')
                     elif period == ReportPeriod.LAST_7D:
-                        start_date = (now - timedelta(days=7)).strftime('%Y-%m-%d 00:00:00')
+                        # Последние 7 дней включая сегодня (6 дней назад + сегодня = 7 дней)
+                        start_date = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
                         end_date = now.strftime('%Y-%m-%d 23:59:59')
                     elif period == ReportPeriod.LAST_30D:
                         start_date = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
@@ -873,11 +877,10 @@ class KeitaroClient:
                 start_date = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
                 end_date = now.strftime('%Y-%m-%d 23:59:59')
             elif period == ReportPeriod.LAST_7D:
-                # ИСПРАВЛЕНИЕ: "Последние 7 дней" должно быть 7 дней назад от вчера, не включая сегодня
-                yesterday = now - timedelta(days=1)
-                start_date = (yesterday - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')  # 6 дней + вчера = 7 дней
-                end_date = yesterday.strftime('%Y-%m-%d 23:59:59')  # до вчера включительно
-                logger.info(f"LAST_7D period corrected: {start_date} to {end_date} (7 days excluding today)")
+                # Последние 7 дней - от 7 дней назад до сегодня (включительно)
+                start_date = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')  
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+                logger.info(f"LAST_7D period: {start_date} to {end_date} (last 7 days including today)")
             elif period == ReportPeriod.LAST_30D:
                 start_date = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
                 end_date = now.strftime('%Y-%m-%d 23:59:59')
@@ -894,7 +897,7 @@ class KeitaroClient:
             from datetime import datetime
             now_debug = datetime.now()
             logger.info(f"DEBUG: Current time is {now_debug}")
-            logger.info(f"DEBUG: For LAST_7D we should use dates from {(now_debug - timedelta(days=7)).strftime('%Y-%m-%d')} to {(now_debug - timedelta(days=1)).strftime('%Y-%m-%d')}")
+            logger.info(f"DEBUG: For LAST_7D we should use dates from {(now_debug - timedelta(days=6)).strftime('%Y-%m-%d')} to {now_debug.strftime('%Y-%m-%d')} (last 7 days including today)")
             logger.info(f"DEBUG: ACTUAL dates being used: {start_date} to {end_date}")
             
             # FIRST REQUEST: Get main metrics without datetime for accurate aggregation
@@ -1000,6 +1003,9 @@ class KeitaroClient:
                         str(creative_id).strip() == ''):
                         continue
                     
+                    # CRITICAL FIX: Normalize creative_id to lowercase for comparison
+                    creative_id = str(creative_id).lower()
+                    
                     datetime_str = row.get('datetime', '')
                     clicks = int(row.get('clicks', 0))
                     
@@ -1029,7 +1035,7 @@ class KeitaroClient:
                 tr32_all_days_clicks = {}
                 for row in active_days_data.get('rows', []):
                     creative_id = row.get('sub_id_4', 'unknown')
-                    if creative_id == 'tr32':
+                    if str(creative_id).lower() == 'tr32':
                         datetime_str = row.get('datetime', '')
                         clicks = int(row.get('clicks', 0))
                         if datetime_str:
