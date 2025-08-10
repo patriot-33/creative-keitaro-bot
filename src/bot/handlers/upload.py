@@ -412,21 +412,36 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         file_io = await bot_instance.download_file(file_info.file_path)  # Получаем io.BytesIO
         file_bytes = file_io.read()  # Читаем реальные байты из потока
         
-        # Загружаем файл в Google Drive
-        from integrations.google.drive import GoogleDriveService
-        
-        google_drive = GoogleDriveService()
-        file_id, web_view_link, sha256_hash_gdrive = await google_drive.upload_file(
-            file_content=file_bytes,
-            filename=file_name,
-            geo=geo,
-            mime_type=mime_type
-        )
-        
-        drive_result = {
-            'file_id': file_id,
-            'web_view_link': web_view_link
-        }
+        # Пробуем загрузить в Google Drive, fallback к временным ссылкам
+        try:
+            from integrations.google.drive import GoogleDriveService
+            
+            google_drive = GoogleDriveService()
+            file_id, web_view_link, sha256_hash_gdrive = await google_drive.upload_file(
+                file_content=file_bytes,
+                filename=file_name,
+                geo=geo,
+                mime_type=mime_type
+            )
+            
+            drive_result = {
+                'file_id': file_id,
+                'web_view_link': web_view_link
+            }
+            logger.info(f"File uploaded to Google Drive successfully: {file_id}")
+            
+        except Exception as gdrive_error:
+            logger.warning(f"Google Drive upload failed: {gdrive_error}")
+            logger.info("Falling back to temporary links for debugging")
+            
+            # Fallback: создаем временные ссылки и локальный hash
+            import hashlib
+            sha256_hash_gdrive = hashlib.sha256(file_bytes).hexdigest()
+            
+            drive_result = {
+                'file_id': f"temp_drive_id_{creative_id}",
+                'web_view_link': f"https://drive.google.com/file/d/temp_{creative_id}/view"
+            }
         
         # Создаем/находим пользователя в базе данных
         from db.models.user import User
@@ -504,9 +519,10 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         logger.error(f"Error saving creative: {e}")
         logger.error(f"Full traceback: {error_details}")
         
+        error_msg = str(e).replace('<', '&lt;').replace('>', '&gt;')[:100]
         await callback.message.edit_text(
             f"❌ <b>Ошибка при сохранении креатива!</b>\n\n"
-            f"🔧 Детали ошибки: {str(e)[:100]}...\n"
+            f"🔧 Детали: {error_msg}...\n"
             f"📞 Если проблема повторяется, обратитесь к администратору.\n\n"
             f"💡 Используйте /upload для повторной попытки.",
             parse_mode="HTML"

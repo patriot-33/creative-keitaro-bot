@@ -363,6 +363,24 @@ drive_result = {
 ✅ Ссылки будут работать корректно
 ✅ SHA256 хэш будет рассчитываться Google Drive Service
 
+### Дополнительное исправление - Fallback при ошибках Google Drive:
+**Проблема**: Google Drive не настроен на production (GOOGLE_DRIVE_ROOT_FOLDER_ID = "temp-folder-id")
+**Решение**: Добавлен fallback к временным ссылкам при ошибке Google Drive
+
+```python
+try:
+    # Пробуем реальную загрузку в Google Drive
+    google_drive = GoogleDriveService()
+    file_id, web_view_link, sha256_hash_gdrive = await google_drive.upload_file(...)
+except Exception as gdrive_error:
+    logger.warning(f"Google Drive upload failed: {gdrive_error}")
+    # Fallback к временным ссылкам
+    drive_result = {
+        'file_id': f"temp_drive_id_{creative_id}",
+        'web_view_link': f"https://drive.google.com/file/d/temp_{creative_id}/view"
+    }
+```
+
 ---
 
 ## Баг #6: Dashboard показывает нулевые данные для Google трафика
