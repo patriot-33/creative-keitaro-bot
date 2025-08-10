@@ -120,14 +120,21 @@ def get_admin_list() -> List[int]:
 
 async def save_user_to_database(user_id: int, user_data: dict, approved_by_id: int = None) -> bool:
     """Сохранение пользователя в базу данных PostgreSQL"""
+    logger.info(f"=== SAVE USER DEBUG ===")
+    logger.info(f"Saving user {user_id} with data: {user_data}")
+    logger.info(f"Approved by: {approved_by_id}")
+    
     try:
         async with get_db_session() as session:
             # Проверяем, существует ли пользователь
+            logger.info(f"Checking if user {user_id} exists in DB...")
             result = await session.execute(select(User).where(User.tg_user_id == user_id))
             existing_user = result.scalar_one_or_none()
+            logger.info(f"Existing user found: {existing_user is not None}")
             
             if existing_user:
                 # Обновляем существующего пользователя
+                logger.info(f"Updating existing user {user_id}")
                 existing_user.role = UserRole(user_data['role'])
                 existing_user.buyer_id = user_data.get('buyer_id')
                 existing_user.tg_username = user_data.get('username', '')
@@ -137,15 +144,30 @@ async def save_user_to_database(user_id: int, user_data: dict, approved_by_id: i
                     existing_user.created_by_id = approved_by_id
             else:
                 # Проверяем, существует ли approved_by_id в БД
+                logger.info(f"Creating new user {user_id}")
+                logger.info(f"Checking if approver {approved_by_id} exists in DB...")
+                
+                # Сначала проверим всех пользователей в БД
+                all_users_result = await session.execute(select(User.tg_user_id, User.id))
+                all_users = all_users_result.fetchall()
+                logger.info(f"All users in DB: {[(u.tg_user_id, u.id) for u in all_users]}")
+                
                 created_by_id = None
                 if approved_by_id:
                     approver_result = await session.execute(select(User).where(User.tg_user_id == approved_by_id))
-                    if approver_result.scalar_one_or_none():
-                        created_by_id = approved_by_id
+                    approver_user = approver_result.scalar_one_or_none()
+                    logger.info(f"Approver query result: {approver_user}")
+                    
+                    if approver_user:
+                        created_by_id = approver_user.id  # Используем internal ID, не tg_user_id!
+                        logger.info(f"Approver found! Using created_by_id={created_by_id}")
                     else:
                         logger.warning(f"Approver {approved_by_id} not found in DB, setting created_by_id=None")
+                else:
+                    logger.info("No approver specified, created_by_id=None")
                 
                 # Создаем нового пользователя
+                logger.info(f"Creating user with created_by_id={created_by_id}")
                 new_user = User(
                     tg_user_id=user_id,
                     tg_username=user_data.get('username', ''),

@@ -234,12 +234,18 @@ async def sync_file_users_to_database(session, file_users):
     from sqlalchemy import select
     from core.enums import UserRole
     
+    logger.info(f"=== SYNC ENV USERS DEBUG ===")
+    logger.info(f"Syncing {len(file_users)} users: {list(file_users.keys())}")
+    
     for tg_id, user_data in file_users.items():
+        logger.info(f"Processing user {tg_id}: {user_data}")
+        
         # Проверяем, существует ли пользователь
         result = await session.execute(select(User).where(User.tg_user_id == int(tg_id)))
         existing_user = result.scalar_one_or_none()
         
         if not existing_user:
+            logger.info(f"Creating new user {tg_id} in database")
             # Создаем нового пользователя
             new_user = User(
                 tg_user_id=int(tg_id),
@@ -250,8 +256,11 @@ async def sync_file_users_to_database(session, file_users):
                 is_active=user_data.get('is_approved', True)
             )
             session.add(new_user)
+        else:
+            logger.info(f"User {tg_id} already exists in database with ID {existing_user.id}")
     
     await session.commit()
+    logger.info("=== SYNC COMPLETED ===")
 
 async def on_startup():
     """Startup tasks"""
