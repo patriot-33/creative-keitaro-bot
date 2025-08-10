@@ -1022,17 +1022,39 @@ class KeitaroClient:
                         if len(creative_active_days) <= 3:
                             logger.info(f"Active day found for {creative_id}: date={date_part}, clicks={clicks}")
                 
+                # ДЕТАЛЬНАЯ ДИАГНОСТИКА АКТИВНЫХ ДНЕЙ TR32
+                logger.info(f"=== TR32 ACTIVE DAYS DIAGNOSTICS ===")
+                
+                # Проверим сколько дней tr32 имел клики БЕЗ порога
+                tr32_all_days_clicks = {}
+                for row in active_days_data.get('rows', []):
+                    creative_id = row.get('sub_id_4', 'unknown')
+                    if creative_id == 'tr32':
+                        datetime_str = row.get('datetime', '')
+                        clicks = int(row.get('clicks', 0))
+                        if datetime_str:
+                            date_part = datetime_str.split('T')[0] if 'T' in datetime_str else datetime_str.split(' ')[0]
+                            if date_part not in tr32_all_days_clicks:
+                                tr32_all_days_clicks[date_part] = 0
+                            tr32_all_days_clicks[date_part] += clicks
+                
+                if tr32_all_days_clicks:
+                    logger.info(f"TR32 ALL days with clicks (no threshold): {tr32_all_days_clicks}")
+                    logger.info(f"TR32 days with clicks >= 10: {[d for d, c in tr32_all_days_clicks.items() if c >= 10]}")
+                    logger.info(f"TR32 days with clicks < 10: {[d for d, c in tr32_all_days_clicks.items() if c < 10]}")
+                    logger.info(f"TR32 total clicks all days: {sum(tr32_all_days_clicks.values())}")
+                else:
+                    logger.warning("TR32 NOT FOUND in active days raw data at all!")
+                
                 # Log tr32 final count with detailed date analysis
                 if 'tr32' in creative_active_days:
                     tr32_dates = sorted(creative_active_days['tr32'])
-                    logger.info(f"tr32 total active days found: {len(tr32_dates)}")
-                    logger.info(f"tr32 active dates: {tr32_dates}")
-                    logger.info(f"tr32 date range analysis: {tr32_dates[0]} to {tr32_dates[-1]} ({len(tr32_dates)} unique days)")
-                    # Log each date for detailed analysis
-                    for date in tr32_dates:
-                        logger.info(f"tr32 was active on: {date}")
+                    logger.info(f"tr32 total active days found (with 10+ threshold): {len(tr32_dates)}")
+                    logger.info(f"tr32 active dates (10+ clicks): {tr32_dates}")
                 else:
-                    logger.warning("tr32 NOT FOUND in active days data")
+                    logger.warning("tr32 NOT FOUND in active days data (10+ clicks)")
+                    
+                logger.info(f"=== END TR32 ACTIVE DAYS DIAGNOSTICS ===")
                     
             else:
                 logger.warning(f"No active days data received. Response: {active_days_data}")
@@ -1148,11 +1170,39 @@ class KeitaroClient:
                         if creative_id == 'tr32':
                             logger.info(f"tr32 lead found in conversions log: total_so_far={conversions_leads[creative_id]}")
                 
+                # ДЕТАЛЬНАЯ ДИАГНОСТИКА ДЛЯ TR32
+                logger.info(f"=== TR32 DIAGNOSTICS START ===")
+                logger.info(f"Total conversions log rows: {len(rows)}")
+                
+                # Подсчитаем tr32 во всех статусах
+                tr32_all_statuses = {}
+                tr32_buyers = set()
+                tr32_dates = set()
+                for row in rows:
+                    creative_id = row.get('sub_id_4', 'unknown')
+                    if creative_id == 'tr32':
+                        status = row.get('status', 'unknown')
+                        buyer = row.get('sub_id_1', 'unknown')
+                        postback_date = row.get('postback_datetime', '')
+                        if postback_date:
+                            tr32_dates.add(postback_date.split(' ')[0])
+                        tr32_buyers.add(buyer)
+                        if status not in tr32_all_statuses:
+                            tr32_all_statuses[status] = 0
+                        tr32_all_statuses[status] += 1
+                
+                logger.info(f"TR32 in conversions log by status: {tr32_all_statuses}")
+                logger.info(f"TR32 buyers in conversions: {tr32_buyers}")
+                logger.info(f"TR32 dates in conversions: {sorted(tr32_dates)}")
+                logger.info(f"TR32 total conversions (all statuses): {sum(tr32_all_statuses.values())}")
+                
                 # Log tr32 final count from conversions log
                 if 'tr32' in conversions_leads:
                     logger.info(f"tr32 CONVERSIONS LOG total leads: {conversions_leads['tr32']}")
                 else:
-                    logger.warning("tr32 NOT FOUND in conversions log")
+                    logger.warning("tr32 NOT FOUND in conversions log leads")
+                
+                logger.info(f"=== TR32 DIAGNOSTICS END ===")
             else:
                 logger.warning("No conversions log data received")
             
@@ -1267,13 +1317,31 @@ class KeitaroClient:
             logger.info(f"Processed {processed_rows} rows, skipped {skipped_rows} rows")
             logger.info(f"Final result: {len(result)} unique creatives")
             
+            # ФИНАЛЬНАЯ ДИАГНОСТИКА TR32
+            logger.info(f"=== TR32 FINAL DIAGNOSTICS ===")
+            
             # Log tr32 details if found (user's case)
             tr32_result = next((r for r in result if r['creative_id'] == 'tr32'), None)
             if tr32_result:
-                logger.info(f"tr32 in final result: leads={tr32_result['leads']}, active_days={tr32_result['active_days']}, revenue=${tr32_result['revenue']}")
-                logger.info(f"tr32 from active_days_data: {len(creative_active_days.get('tr32', set()))} unique dates")
+                logger.info(f"TR32 FINAL RESULT:")
+                logger.info(f"  - unique_clicks: {tr32_result['unique_clicks']} (ожидается 317)")
+                logger.info(f"  - leads: {tr32_result['leads']} (ожидается 120)")
+                logger.info(f"  - deposits: {tr32_result['deposits']} (ожидается 17)")
+                logger.info(f"  - revenue: ${tr32_result['revenue']} (ожидается $2115)")
+                logger.info(f"  - active_days: {tr32_result['active_days']} (ожидается 2)")
+                logger.info(f"  - uepc: ${tr32_result['uepc']:.2f}")
+                
+                # Сравнение источников данных
+                logger.info(f"TR32 DATA SOURCES COMPARISON:")
+                logger.info(f"  - Report API leads: {creatives_data.get('tr32', {}).get('leads', 0)}")
+                logger.info(f"  - Conversions Log leads: {conversions_leads.get('tr32', 0)}")
+                logger.info(f"  - Final used leads: {tr32_result['leads']}")
+                logger.info(f"  - Active days from set: {len(creative_active_days.get('tr32', set()))}")
             else:
-                logger.info("tr32 NOT FOUND in final result")
+                logger.warning("TR32 NOT FOUND in final result!")
+                logger.info(f"Available creative IDs: {[r['creative_id'] for r in result[:10]]}")
+            
+            logger.info(f"=== END TR32 FINAL DIAGNOSTICS ===")
             
             # Also log TR36 details if found
             tr36_result = next((r for r in result if r['creative_id'] == 'TR36'), None)
