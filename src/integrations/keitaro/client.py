@@ -873,8 +873,11 @@ class KeitaroClient:
                 start_date = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
                 end_date = now.strftime('%Y-%m-%d 23:59:59')
             elif period == ReportPeriod.LAST_7D:
-                start_date = (now - timedelta(days=7)).strftime('%Y-%m-%d 00:00:00')
-                end_date = now.strftime('%Y-%m-%d 23:59:59')
+                # ИСПРАВЛЕНИЕ: "Последние 7 дней" должно быть 7 дней назад от вчера, не включая сегодня
+                yesterday = now - timedelta(days=1)
+                start_date = (yesterday - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')  # 6 дней + вчера = 7 дней
+                end_date = yesterday.strftime('%Y-%m-%d 23:59:59')  # до вчера включительно
+                logger.info(f"LAST_7D period corrected: {start_date} to {end_date} (7 days excluding today)")
             elif period == ReportPeriod.LAST_30D:
                 start_date = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
                 end_date = now.strftime('%Y-%m-%d 23:59:59')
@@ -1011,9 +1014,15 @@ class KeitaroClient:
                         if len(creative_active_days) <= 3:
                             logger.info(f"Active day found for {creative_id}: date={date_part}, clicks={clicks}")
                 
-                # Log tr32 final count
+                # Log tr32 final count with detailed date analysis
                 if 'tr32' in creative_active_days:
-                    logger.info(f"tr32 total active days found: {len(creative_active_days['tr32'])}, dates: {sorted(creative_active_days['tr32'])}")
+                    tr32_dates = sorted(creative_active_days['tr32'])
+                    logger.info(f"tr32 total active days found: {len(tr32_dates)}")
+                    logger.info(f"tr32 active dates: {tr32_dates}")
+                    logger.info(f"tr32 date range analysis: {tr32_dates[0]} to {tr32_dates[-1]} ({len(tr32_dates)} unique days)")
+                    # Log each date for detailed analysis
+                    for date in tr32_dates:
+                        logger.info(f"tr32 was active on: {date}")
                 else:
                     logger.warning("tr32 NOT FOUND in active days data")
                     
