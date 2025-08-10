@@ -42,7 +42,7 @@ async def cmd_start(message: Message):
     
     # Check if user is in whitelist
     allowed_users = settings.allowed_users
-    user_info = allowed_users.get(user.id)
+    user_info = allowed_users.get(user.id) or allowed_users.get(str(user.id))
     
     if not user_info:
         logger.info(f"Unregistered user {user.id} ({user.username}) accessed /start")
@@ -193,6 +193,7 @@ async def load_users_from_database():
             
             settings.allowed_users = users
             logger.info(f"Loaded {len(users)} users from database + ENV (ENV users have priority)")
+            logger.info(f"Loaded users: {list(users.keys())}")
             
             # Если нет пользователей вообще, загружаем из файла как fallback
             if not users:
