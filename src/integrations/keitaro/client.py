@@ -540,13 +540,15 @@ class KeitaroClient:
                     buyer_stats[buyer]['streams'].add(row['stream'])
             
             # Now get click data for these buyers
-            # Build report for clicks
+            # Build report for clicks with proper grouping
             report_params = {
-                'metrics': ['clicks', 'unique_visitors', 'cost'],
+                'columns': ['sub_id_1', 'clicks', 'unique_clicks', 'conversions', 'leads', 'cost'],
+                'metrics': ['clicks', 'unique_clicks', 'conversions', 'leads', 'cost'],
+                'grouping': ['sub_id_1'],  # Group by buyer
                 'filters': []
             }
             
-            # Add time range
+            # Add time range (use same time range as conversions for consistency)
             report_params['range'] = {
                 'from': start_date,
                 'to': end_date,
@@ -561,13 +563,8 @@ class KeitaroClient:
                     'expression': traffic_source_ids
                 })
             
-            # Add buyer filter to only get data for buyers we found
-            if buyer_stats:
-                report_params['filters'].append({
-                    'name': 'sub_id_1',
-                    'operator': 'IN_LIST', 
-                    'expression': list(buyer_stats.keys())
-                })
+            # Don't filter by buyers - get all buyers for this traffic source
+            # We'll match them later
             
             # Validate that we're not using traffic_source_id in filters
             for filter_item in report_params.get('filters', []):
