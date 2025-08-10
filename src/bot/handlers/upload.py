@@ -420,23 +420,34 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         file_bytes = file_io.read()  # Читаем реальные байты из потока
         
         # Пробуем загрузить в Google Drive, fallback к временным ссылкам
+        logger.info(f"Starting Google Drive upload process...")
+        logger.info(f"File details: name={file_name}, size={len(file_bytes)} bytes, mime={mime_type}, geo={geo}")
+        
         try:
             from integrations.google.drive import GoogleDriveService
             
+            logger.info("Initializing GoogleDriveService...")
             google_drive = GoogleDriveService()
+            logger.info(f"GoogleDriveService initialized with root folder: {google_drive.root_folder_id}")
+            
+            logger.info("Calling google_drive.upload_file()...")
             file_id, web_view_link, sha256_hash_gdrive = await google_drive.upload_file(
                 file_content=file_bytes,
                 filename=file_name,
                 geo=geo,
                 mime_type=mime_type
             )
+            logger.info("google_drive.upload_file() completed successfully")
             
             drive_result = {
                 'file_id': file_id,
                 'web_view_link': web_view_link
             }
-            logger.info(f"File uploaded to Google Drive successfully: {file_id}")
-            logger.info(f"Google Drive folder ID: {google_drive.root_folder_id}")
+            logger.info(f"Google Drive upload SUCCESS!")
+            logger.info(f"  - File ID: {file_id}")
+            logger.info(f"  - Web View Link: {web_view_link}")
+            logger.info(f"  - SHA256: {sha256_hash_gdrive[:16]}...")
+            logger.info(f"  - Root Folder ID: {google_drive.root_folder_id}")
             
         except Exception as gdrive_error:
             logger.warning(f"Google Drive upload failed: {gdrive_error}")
