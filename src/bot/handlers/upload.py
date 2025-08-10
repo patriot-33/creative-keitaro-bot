@@ -69,6 +69,17 @@ CUSTOM_GEOS_FILE = "data/custom_geos.json"
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.mp4', '.mov', '.gif', '.webp'}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
+def generate_creative_id(geo: str) -> str:
+    """Генерация ID креатива в формате IDGEOДДММГГNNN"""
+    from datetime import datetime
+    import random
+    
+    now = datetime.now()
+    date_part = now.strftime('%d%m%y')  # ДДММГГ
+    sequence = random.randint(1, 999)   # Случайный номер 001-999
+    
+    return f"ID{geo.upper()}{date_part}{sequence:03d}"
+
 @router.message(Command("upload"))
 async def cmd_upload(message: Message, state: FSMContext):
     """Команда для начала загрузки креатива"""
@@ -377,6 +388,17 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
     # Генерируем ID креатива
     creative_id = generate_creative_id(geo)
     
+    # Определяем MIME type
+    mime_type = 'application/octet-stream'  # default
+    if file_ext.lower() in ['.jpg', '.jpeg']:
+        mime_type = 'image/jpeg'
+    elif file_ext.lower() == '.png':
+        mime_type = 'image/png'
+    elif file_ext.lower() == '.mp4':
+        mime_type = 'video/mp4'
+    elif file_ext.lower() == '.gif':
+        mime_type = 'image/gif'
+    
     # Получаем информацию о пользователе
     user_info = settings.allowed_users.get(user.id, {})
     buyer_id = user_info.get('buyer_id', '')
@@ -386,7 +408,7 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
     try:
         # Скачиваем файл с Telegram
         bot_instance = callback.bot
-        file_info = await bot_instance.get_file(file_id)
+        file_info = await bot_instance.get_file(telegram_file_id)
         file_bytes = await bot_instance.download_file(file_info.file_path)
         
         # ВРЕМЕННО: пропускаем Google Drive для отладки
