@@ -542,8 +542,8 @@ class KeitaroClient:
             # Now get click data for these buyers
             # Build report for clicks with proper grouping
             report_params = {
-                'columns': ['sub_id_1', 'clicks', 'unique_clicks', 'conversions', 'leads', 'cost'],
-                'metrics': ['clicks', 'unique_clicks', 'conversions', 'leads', 'cost'],
+                'columns': ['sub_id_1', 'clicks', 'global_unique_clicks', 'conversions', 'leads', 'cost'],
+                'metrics': ['clicks', 'global_unique_clicks', 'conversions', 'leads', 'cost'],
                 'grouping': ['sub_id_1'],  # Group by buyer
                 'filters': []
             }
@@ -578,10 +578,10 @@ class KeitaroClient:
                 
                 if click_data and 'rows' in click_data:
                     for row in click_data['rows']:
-                        buyer = row.get('buyer', 'unknown')
+                        buyer = row.get('sub_id_1', 'unknown')
                         if buyer in buyer_stats:
                             buyer_stats[buyer]['clicks'] = row.get('clicks', 0)
-                            buyer_stats[buyer]['unique_visitors'] = row.get('unique_visitors', 0)
+                            buyer_stats[buyer]['unique_visitors'] = row.get('global_unique_clicks', 0)
                             buyer_stats[buyer]['cost'] = float(row.get('cost', 0))
             except Exception as e:
                 logger.warning(f"Could not get click data (continuing with conversion data only): {e}")
