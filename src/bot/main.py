@@ -184,10 +184,17 @@ async def load_users_from_database():
                     'is_approved': user.is_active
                 }
             
-            settings.allowed_users = users
-            logger.info(f"Loaded {len(users)} users from database")
+            # Добавляем пользователей из ENV переменной ALLOWED_USERS (приоритет)
+            env_users = settings.allowed_users.copy() if hasattr(settings, 'allowed_users') and settings.allowed_users else {}
             
-            # Если нет пользователей в БД, загружаем из ENV как fallback
+            # Объединяем БД пользователей с ENV пользователями (ENV имеет приоритет)
+            for env_user_id, env_user_data in env_users.items():
+                users[str(env_user_id)] = env_user_data
+            
+            settings.allowed_users = users
+            logger.info(f"Loaded {len(users)} users from database + ENV (ENV users have priority)")
+            
+            # Если нет пользователей вообще, загружаем из файла как fallback
             if not users:
                 from bot.handlers.admin import load_users
                 file_users = load_users()
