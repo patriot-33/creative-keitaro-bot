@@ -409,7 +409,8 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         # Скачиваем файл с Telegram
         bot_instance = callback.bot
         file_info = await bot_instance.get_file(telegram_file_id)
-        file_bytes = await bot_instance.download_file(file_info.file_path)
+        file_io = await bot_instance.download_file(file_info.file_path)  # Получаем io.BytesIO
+        file_bytes = file_io.read()  # Читаем реальные байты из потока
         
         # ВРЕМЕННО: пропускаем Google Drive для отладки
         # Создаем fake drive результат
