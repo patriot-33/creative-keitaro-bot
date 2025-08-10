@@ -985,8 +985,10 @@ class KeitaroClient:
             active_days_data = await self._make_request('/admin_api/v1/report/build', method='POST', json=active_days_params)
             logger.info(f"Active days API response keys: {list(active_days_data.keys()) if active_days_data else 'None'}")
             
-            # Process active days data to get unique dates per creative
+            # ИСПРАВЛЕНО: Process active days data - считаем КОЛИЧЕСТВО кликов за день, а не отдельные строки
             creative_active_days = {}
+            creative_daily_clicks = {}  # Счетчик кликов по дням для каждого креатива
+            
             if active_days_data and 'rows' in active_days_data:
                 logger.info(f"Active days API returned {len(active_days_data['rows'])} rows")
                 
@@ -995,6 +997,7 @@ class KeitaroClient:
                     sample_row = active_days_data['rows'][0]
                     logger.info(f"Sample active days row: {sample_row}")
                 
+                # ПЕРВЫЙ ПРОХОД: Считаем клики по дням для каждого креатива
                 for row in active_days_data['rows']:
                     creative_id = row.get('sub_id_4', 'unknown')
                     # Skip empty or invalid creative IDs
@@ -1003,39 +1006,43 @@ class KeitaroClient:
                         str(creative_id).strip() == ''):
                         continue
                     
-                    # УБИРАЕМ НОРМАЛИЗАЦИЮ - Keitaro чувствителен к регистру!
-                    # Не нормализуем, чтобы сохранить исходный регистр из API
+                    # Сохраняем исходный регистр из API
                     creative_id = str(creative_id)
                     
                     datetime_str = row.get('datetime', '')
-                    clicks = int(row.get('clicks', 0))
-                    
-                    # ДИАГНОСТИКА: логируем все попытки обработки для tr32
-                    if creative_id == 'tr32':
-                        logger.info(f"tr32 processing attempt: clicks={clicks}, datetime={datetime_str}, threshold_check={clicks >= 10}")
-                    
-                    if clicks >= 10 and datetime_str:  # ИСПРАВЛЕНИЕ: активный день требует минимум 10 кликов
-                        # Extract date part
-                        try:
-                            date_part = datetime_str.split('T')[0] if 'T' in datetime_str else datetime_str.split(' ')[0]
-                        except:
-                            date_part = datetime_str
+                    if not datetime_str:
+                        continue
                         
-                        if creative_id not in creative_active_days:
-                            creative_active_days[creative_id] = set()
-                        creative_active_days[creative_id].add(date_part)
+                    # Extract date part
+                    try:
+                        date_part = datetime_str.split('T')[0] if 'T' in datetime_str else datetime_str.split(' ')[0]
+                    except:
+                        continue
                         
-                        # Log tr32 specifically  
+                    # Инициализируем структуру данных
+                    if creative_id not in creative_daily_clicks:
+                        creative_daily_clicks[creative_id] = {}
+                    if date_part not in creative_daily_clicks[creative_id]:
+                        creative_daily_clicks[creative_id][date_part] = 0
+                        
+                    # Каждая строка = 1 клик
+                    creative_daily_clicks[creative_id][date_part] += 1
+                
+                # ВТОРОЙ ПРОХОД: Определяем активные дни (10+ кликов за день)
+                for creative_id, daily_data in creative_daily_clicks.items():
+                    for date_part, total_clicks in daily_data.items():
+                        # ДИАГНОСТИКА: логируем tr32
                         if creative_id == 'tr32':
-                            logger.info(f"tr32 active day found: date={date_part}, clicks={clicks}")
+                            logger.info(f"tr32 daily summary: date={date_part}, total_clicks={total_clicks}, is_active={total_clicks >= 10}")
+                        
+                        if total_clicks >= 10:
+                            if creative_id not in creative_active_days:
+                                creative_active_days[creative_id] = set()
+                            creative_active_days[creative_id].add(date_part)
                             
-                        # Log first few valid creatives for debugging
-                        if len(creative_active_days) <= 5:
-                            logger.info(f"Active day found for {creative_id}: date={date_part}, clicks={clicks}")
-                            
-                        # ДОПОЛНИТЕЛЬНАЯ ДИАГНОСТИКА: логируем все обработанные ID
-                        if len(creative_active_days) <= 10:
-                            logger.info(f"Processed creative ID: '{creative_id}' (type: {type(creative_id)}) with {clicks} clicks on {date_part}")
+                            # Log tr32 specifically  
+                            if creative_id == 'tr32':
+                                logger.info(f"tr32 ACTIVE day confirmed: {date_part} with {total_clicks} clicks")
                 
                 # ДЕТАЛЬНАЯ ДИАГНОСТИКА АКТИВНЫХ ДНЕЙ TR32
                 logger.info(f"=== TR32 ACTIVE DAYS DIAGNOSTICS ===")
