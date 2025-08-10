@@ -160,22 +160,84 @@ async def cmd_help(message: Message):
     await message.answer(help_text)
 
 
-def load_users_from_file():
-    """Загрузка пользователей из файла при запуске"""
+async def load_users_from_database():
+    """Загрузка пользователей из базы данных при запуске"""
     try:
-        from bot.handlers.admin import load_users
-        users = load_users()
-        settings.allowed_users = users
-        logger.info(f"Loaded {len(users)} users from file")
+        from db.database import get_db_session
+        from db.models.user import User
+        from sqlalchemy import select
+        from core.enums import UserRole
+        
+        async with get_db_session() as session:
+            # Получаем всех пользователей из БД
+            result = await session.execute(select(User))
+            db_users = result.scalars().all()
+            
+            # Конвертируем в формат settings
+            users = {}
+            for user in db_users:
+                users[str(user.tg_user_id)] = {
+                    'role': user.role.value,
+                    'buyer_id': user.buyer_id or '',
+                    'username': user.tg_username or '',
+                    'first_name': user.full_name or '',
+                    'is_approved': user.is_active
+                }
+            
+            settings.allowed_users = users
+            logger.info(f"Loaded {len(users)} users from database")
+            
+            # Если нет пользователей в БД, загружаем из ENV как fallback
+            if not users:
+                from bot.handlers.admin import load_users
+                file_users = load_users()
+                if file_users:
+                    # Синхронизируем файловых пользователей в БД
+                    await sync_file_users_to_database(session, file_users)
+                    settings.allowed_users = file_users
+                    logger.info(f"Migrated {len(file_users)} users from file to database")
+                
     except Exception as e:
-        logger.warning(f"Failed to load users from file: {e}")
+        logger.warning(f"Failed to load users from database: {e}")
+        # Fallback к файлу
+        try:
+            from bot.handlers.admin import load_users
+            users = load_users()
+            settings.allowed_users = users
+            logger.info(f"Loaded {len(users)} users from file (fallback)")
+        except Exception as file_error:
+            logger.error(f"Failed to load users from file fallback: {file_error}")
+
+async def sync_file_users_to_database(session, file_users):
+    """Синхронизация пользователей из файла в базу данных"""
+    from db.models.user import User
+    from sqlalchemy import select
+    
+    for tg_id, user_data in file_users.items():
+        # Проверяем, существует ли пользователь
+        result = await session.execute(select(User).where(User.tg_user_id == int(tg_id)))
+        existing_user = result.scalar_one_or_none()
+        
+        if not existing_user:
+            # Создаем нового пользователя
+            new_user = User(
+                tg_user_id=int(tg_id),
+                tg_username=user_data.get('username', ''),
+                full_name=user_data.get('first_name', ''),
+                role=UserRole(user_data.get('role', 'buyer')),
+                buyer_id=user_data.get('buyer_id') if user_data.get('buyer_id') else None,
+                is_active=user_data.get('is_approved', True)
+            )
+            session.add(new_user)
+    
+    await session.commit()
 
 async def on_startup():
     """Startup tasks"""
     logger.info("Starting bot...")
     
-    # Load users from file
-    load_users_from_file()
+    # Load users from database
+    await load_users_from_database()
     
     # Create database tables
     try:

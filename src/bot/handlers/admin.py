@@ -15,6 +15,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
 from core.config import settings
+from db.database import get_db_session
+from db.models.user import User
+from sqlalchemy import select
+from core.enums import UserRole
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -108,6 +112,68 @@ def get_admin_list() -> List[int]:
         if user_info.get('role') in ['owner', 'head', 'teamlead']:
             admins.append(user_id)
     return admins
+
+async def save_user_to_database(user_id: int, user_data: dict, approved_by_id: int = None) -> bool:
+    """Сохранение пользователя в базу данных PostgreSQL"""
+    try:
+        async with get_db_session() as session:
+            # Проверяем, существует ли пользователь
+            result = await session.execute(select(User).where(User.tg_user_id == user_id))
+            existing_user = result.scalar_one_or_none()
+            
+            if existing_user:
+                # Обновляем существующего пользователя
+                existing_user.role = UserRole(user_data['role'])
+                existing_user.buyer_id = user_data.get('buyer_id')
+                existing_user.tg_username = user_data.get('username', '')
+                existing_user.full_name = user_data.get('first_name', '')
+                existing_user.is_active = True
+                if approved_by_id:
+                    existing_user.created_by_id = approved_by_id
+            else:
+                # Создаем нового пользователя
+                new_user = User(
+                    tg_user_id=user_id,
+                    tg_username=user_data.get('username', ''),
+                    full_name=user_data.get('first_name', ''),
+                    role=UserRole(user_data['role']),
+                    buyer_id=user_data.get('buyer_id') if user_data.get('buyer_id') else None,
+                    is_active=True,
+                    created_by_id=approved_by_id
+                )
+                session.add(new_user)
+            
+            await session.commit()
+            logger.info(f"User {user_id} saved to database with role {user_data['role']}")
+            return True
+            
+    except Exception as e:
+        logger.error(f"Failed to save user {user_id} to database: {e}")
+        return False
+
+async def sync_settings_with_database():
+    """Синхронизация settings.allowed_users с базой данных"""
+    try:
+        async with get_db_session() as session:
+            result = await session.execute(select(User).where(User.is_active == True))
+            db_users = result.scalars().all()
+            
+            # Конвертируем в формат settings
+            users = {}
+            for user in db_users:
+                users[user.tg_user_id] = {
+                    'role': user.role.value,
+                    'buyer_id': user.buyer_id or '',
+                    'username': user.tg_username or '',
+                    'first_name': user.full_name or '',
+                    'is_approved': user.is_active
+                }
+            
+            settings.allowed_users = users
+            logger.info(f"Settings synchronized with {len(users)} users from database")
+            
+    except Exception as e:
+        logger.error(f"Failed to sync settings with database: {e}")
 
 # ===== РЕГИСТРАЦИЯ НОВЫХ ПОЛЬЗОВАТЕЛЕЙ =====
 
@@ -714,22 +780,34 @@ async def handle_approve_user(callback: CallbackQuery):
         await callback.answer("❌ У вас нет прав на апрув этой роли!", show_alert=True)
         return
     
-    # Переносим в основной список пользователей
-    users = load_users()
-    users[target_id] = {
+    # Сохраняем пользователя в базу данных
+    user_data = {
         'role': role,
         'buyer_id': user_info.get('buyer_id'),
-        'approved_by': admin_id,
-        'approved_at': datetime.now().isoformat()
+        'username': user_info.get('username', ''),
+        'first_name': user_info.get('first_name', ''),
     }
     
-    # Удаляем из ожидания
-    del pending[target_id]
+    # Сохраняем в PostgreSQL
+    db_save_success = await save_user_to_database(target_id, user_data, admin_id)
     
-    # Сохраняем
-    if save_users(users) and save_pending_users(pending):
-        # Обновляем конфиг
-        settings.allowed_users = users
+    if db_save_success:
+        # Дополнительно сохраняем в JSON файл для обратной совместимости
+        users = load_users()
+        users[target_id] = {
+            'role': role,
+            'buyer_id': user_info.get('buyer_id'),
+            'approved_by': admin_id,
+            'approved_at': datetime.now().isoformat()
+        }
+        save_users(users)  # Не блокируем на ошибке файла
+        
+        # Удаляем из ожидания
+        del pending[target_id]
+        save_pending_users(pending)
+        
+        # Синхронизируем settings с базой данных
+        await sync_settings_with_database()
         
         role_names = {
             'buyer': '💼 Медиабаер',
@@ -749,9 +827,9 @@ async def handle_approve_user(callback: CallbackQuery):
         # Уведомляем пользователя
         await notify_user_approved(target_id, role)
         
-        logger.info(f"Admin {admin_id} approved user {target_id} with role {role}")
+        logger.info(f"Admin {admin_id} approved user {target_id} with role {role} - saved to PostgreSQL")
     else:
-        await callback.answer("❌ Ошибка при сохранении!", show_alert=True)
+        await callback.answer("❌ Ошибка при сохранении в базу данных!", show_alert=True)
     
     await callback.answer()
 
