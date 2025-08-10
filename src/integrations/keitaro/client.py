@@ -888,9 +888,10 @@ class KeitaroClient:
             logger.info(f"Date range: {start_date} - {end_date}")
             
             # FIRST REQUEST: Get main metrics without datetime for accurate aggregation
+            # Try without country grouping to avoid splitting data across countries
             main_report_params = {
                 'metrics': ['clicks', 'global_unique_clicks', 'conversions', 'leads', 'sales', 'revenue'],
-                'columns': ['sub_id_4', 'sub_id_1', 'country'],
+                'columns': ['sub_id_4', 'sub_id_1'],  # Remove country to get unified data
                 'filters': [
                     {
                         'name': 'datetime',
@@ -898,7 +899,7 @@ class KeitaroClient:
                         'expression': [start_date, end_date]
                     }
                 ],
-                'grouping': ['sub_id_4', 'sub_id_1', 'country'],
+                'grouping': ['sub_id_4', 'sub_id_1'],  # Remove country grouping
                 'sort': [{'name': 'revenue', 'order': 'DESC'}],
                 'limit': 10000
             }
@@ -1025,6 +1026,45 @@ class KeitaroClient:
             if not creative_active_days:
                 logger.warning("FALLBACK: No active days data received, will use default value of 1 for all creatives")
             
+            # THIRD REQUEST: Get country information for creatives (separate to avoid data splitting)
+            geo_params = {
+                'metrics': ['clicks'],  # Just need minimal data
+                'columns': ['sub_id_4', 'country'],
+                'filters': main_report_params['filters'].copy(),  # Same filters as main
+                'grouping': ['sub_id_4', 'country'],
+                'limit': 10000
+            }
+            
+            logger.info(f"=== GEO REQUEST ===")
+            logger.info(f"Geo API params: {geo_params}")
+            
+            geo_data = await self._make_request('/admin_api/v1/report/build', method='POST', json=geo_params)
+            
+            # Process geo data to get countries per creative
+            creative_countries = {}
+            if geo_data and 'rows' in geo_data:
+                logger.info(f"Geo API returned {len(geo_data['rows'])} rows")
+                for row in geo_data['rows']:
+                    creative_id = row.get('sub_id_4', 'unknown')
+                    if (creative_id == 'unknown' or not creative_id or 
+                        creative_id in ['', ' ', 'null', '{sub_id_4}'] or
+                        str(creative_id).strip() == ''):
+                        continue
+                        
+                    country = row.get('country', 'unknown')
+                    if country and country != 'unknown':
+                        if creative_id not in creative_countries:
+                            creative_countries[creative_id] = set()
+                        creative_countries[creative_id].add(country)
+                        
+                        # Log tr32 countries
+                        if creative_id == 'tr32':
+                            logger.info(f"tr32 country found: {country}")
+            else:
+                logger.warning("No geo data received")
+                
+            logger.info(f"Processed geo data for {len(creative_countries)} creatives")
+            
             # Process and aggregate main data by creative (accurate metrics)
             creatives_data = {}
             processed_rows = 0
@@ -1048,16 +1088,16 @@ class KeitaroClient:
                     str(buyer).strip() == ''):
                     buyer = 'unknown'
                 
-                country = row.get('country', 'unknown')
                 clicks = int(row.get('clicks', 0))
                 unique_clicks = int(row.get('global_unique_clicks', 0))
+                leads_to_add = int(row.get('leads', 0))
                 
                 # Initialize creative data if not exists
                 if creative_id not in creatives_data:
                     creatives_data[creative_id] = {
                         'creative_id': creative_id,
                         'buyer_id': buyer,
-                        'geos': set(),
+                        'geos': set(),  # Will be populated separately
                         'clicks': 0,
                         'unique_clicks': 0,
                         'conversions': 0,
@@ -1066,19 +1106,17 @@ class KeitaroClient:
                         'revenue': 0.0
                     }
                 
-                # Aggregate data
-                creatives_data[creative_id]['geos'].add(country)
+                # Aggregate data (no country info in this request)
                 creatives_data[creative_id]['clicks'] += clicks
                 creatives_data[creative_id]['unique_clicks'] += unique_clicks
                 creatives_data[creative_id]['conversions'] += int(row.get('conversions', 0))
-                leads_to_add = int(row.get('leads', 0))
                 creatives_data[creative_id]['leads'] += leads_to_add
                 creatives_data[creative_id]['deposits'] += int(row.get('sales', 0))
                 creatives_data[creative_id]['revenue'] += float(row.get('revenue', 0))
                 
                 # Debug tr32 leads aggregation
                 if creative_id == 'tr32':
-                    logger.info(f"tr32 row: country={country}, leads={leads_to_add}, total_leads_so_far={creatives_data[creative_id]['leads']}")
+                    logger.info(f"tr32 row: buyer={buyer}, leads={leads_to_add}, total_leads_so_far={creatives_data[creative_id]['leads']}, total_revenue={creatives_data[creative_id]['revenue']}")
             
             # Calculate metrics and format result
             result = []
@@ -1094,10 +1132,14 @@ class KeitaroClient:
                 if active_days == 0:
                     active_days = 1  # Default to 1 if no dates tracked
                 
+                # Get countries from third API call
+                countries = creative_countries.get(creative_id, set())
+                geos_string = ', '.join(sorted(countries)) if countries else 'Unknown'
+                
                 result.append({
                     'creative_id': creative_id,
                     'buyer_id': data['buyer_id'],
-                    'geos': ', '.join(sorted(data['geos'])),
+                    'geos': geos_string,
                     'clicks': data['clicks'],
                     'unique_clicks': data['unique_clicks'],
                     'conversions': data['conversions'],
