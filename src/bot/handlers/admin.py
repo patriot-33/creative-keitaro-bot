@@ -84,14 +84,17 @@ def save_pending_users(pending: Dict[int, Dict[str, Any]]) -> bool:
 
 def is_admin(user_id: int) -> bool:
     """Проверка прав администратора"""
-    users = load_users()
-    user_info = users.get(user_id, {})
-    return user_info.get('role') in ['owner', 'head']
+    # Используем settings.allowed_users вместо файла для актуальности
+    users = settings.allowed_users
+    user_info = users.get(user_id, {}) or users.get(str(user_id), {})
+    role = user_info.get('role', '')
+    logger.info(f"Admin check for user {user_id}: role={role}, is_admin={role in ['owner', 'head']}")
+    return role in ['owner', 'head']
 
 def can_approve_user(admin_id: int, target_role: str) -> bool:
     """Проверка прав на апрув пользователя"""
-    users = load_users()
-    admin_info = users.get(admin_id, {})
+    users = settings.allowed_users
+    admin_info = users.get(admin_id, {}) or users.get(str(admin_id), {})
     admin_role = admin_info.get('role', '')
     
     # Owner может апрувить кого угодно
@@ -106,11 +109,13 @@ def can_approve_user(admin_id: int, target_role: str) -> bool:
 
 def get_admin_list() -> List[int]:
     """Получить список всех админов для уведомлений"""
-    users = load_users()
+    users = settings.allowed_users
     admins = []
     for user_id, user_info in users.items():
         if user_info.get('role') in ['owner', 'head', 'teamlead']:
-            admins.append(user_id)
+            # Конвертируем user_id в int если это строка
+            admin_id = int(user_id) if isinstance(user_id, str) else user_id
+            admins.append(admin_id)
     return admins
 
 async def save_user_to_database(user_id: int, user_data: dict, approved_by_id: int = None) -> bool:

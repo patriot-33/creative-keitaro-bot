@@ -44,6 +44,11 @@ async def cmd_start(message: Message):
     allowed_users = settings.allowed_users
     user_info = allowed_users.get(user.id) or allowed_users.get(str(user.id))
     
+    # Debug logging
+    logger.info(f"User {user.id} lookup: user_info={user_info}")
+    logger.info(f"Available users: {list(allowed_users.keys())}")
+    logger.info(f"User types: {[(k, type(k)) for k in allowed_users.keys()]}")
+    
     if not user_info:
         logger.info(f"Unregistered user {user.id} ({user.username}) accessed /start")
         
