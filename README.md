@@ -59,7 +59,7 @@ A professional-grade Telegram bot that integrates with Keitaro tracker to provid
 #### Setup
 ```bash
 # Clone repository
-git clone https://github.com/your-username/creative-keitaro-bot.git
+git clone https://github.com/patriot-33/creative-keitaro-bot.git
 cd creative-keitaro-bot
 
 # Install dependencies
@@ -273,8 +273,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **[API Reference](docs/api.md)** - Technical API documentation
 
 ### Getting Help
-- **Issues** - Report bugs via [GitHub Issues](https://github.com/your-username/creative-keitaro-bot/issues)
-- **Discussions** - Ask questions in [GitHub Discussions](https://github.com/your-username/creative-keitaro-bot/discussions)
+- **Issues** - Report bugs via [GitHub Issues](https://github.com/patriot-33/creative-keitaro-bot/issues)
+- **Discussions** - Ask questions in [GitHub Discussions](https://github.com/patriot-33/creative-keitaro-bot/discussions)
 - **Email** - Contact support at your-email@example.com
 
 ---
@@ -285,7 +285,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 Made with ❤️ for the media buying community
 
-[Report Bug](https://github.com/your-username/creative-keitaro-bot/issues) · [Request Feature](https://github.com/your-username/creative-keitaro-bot/issues) · [Documentation](DEPLOYMENT.md)
+[Report Bug](https://github.com/patriot-33/creative-keitaro-bot/issues) · [Request Feature](https://github.com/patriot-33/creative-keitaro-bot/issues) · [Documentation](DEPLOYMENT.md)
 
 
 </div>
