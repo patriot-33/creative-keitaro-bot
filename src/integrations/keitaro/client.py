@@ -1065,10 +1065,83 @@ class KeitaroClient:
                 
             logger.info(f"Processed geo data for {len(creative_countries)} creatives")
             
+            # FOURTH REQUEST: Get accurate leads count using conversions log (for validation)
+            conversions_params = {
+                "limit": 10000,
+                "columns": ["sub_id_4", "sub_id_1", "status"],
+                "filters": [
+                    {
+                        "name": "postback_datetime",
+                        "operator": "BETWEEN",
+                        "expression": [start_date, end_date]
+                    }
+                ],
+                "sort": [{"name": "postback_datetime", "order": "DESC"}]
+            }
+            
+            # Add same filters as main request
+            if buyer_id:
+                conversions_params['filters'].append({
+                    'name': 'sub_id_1',
+                    'operator': 'EQUALS',
+                    'expression': buyer_id
+                })
+            
+            if geo:
+                conversions_params['filters'].append({
+                    'name': 'country',
+                    'operator': 'EQUALS',
+                    'expression': geo
+                })
+            
+            if traffic_source_ids:
+                conversions_params['filters'].append({
+                    'name': 'ts_id',
+                    'operator': 'IN_LIST',
+                    'expression': traffic_source_ids
+                })
+            
+            logger.info(f"=== CONVERSIONS LOG REQUEST (for validation) ===")
+            logger.info(f"Conversions API params: {conversions_params}")
+            
+            conversions_data = await self._make_request('/admin_api/v1/conversions/log', method='POST', json=conversions_params)
+            
+            # Process conversions log to get accurate lead counts
+            conversions_leads = {}
+            if conversions_data:
+                rows = conversions_data.get('rows', []) if isinstance(conversions_data, dict) else conversions_data if isinstance(conversions_data, list) else []
+                logger.info(f"Conversions log API returned {len(rows)} conversions")
+                
+                for row in rows:
+                    creative_id = row.get('sub_id_4', 'unknown')
+                    if (creative_id == 'unknown' or not creative_id or 
+                        creative_id in ['{sub_id_4}', 'null', '', ' '] or
+                        str(creative_id).strip() == ''):
+                        continue
+                    
+                    status = row.get('status', '')
+                    if status == 'lead':
+                        if creative_id not in conversions_leads:
+                            conversions_leads[creative_id] = 0
+                        conversions_leads[creative_id] += 1
+                        
+                        # Log tr32 specifically
+                        if creative_id == 'tr32':
+                            logger.info(f"tr32 lead found in conversions log: total_so_far={conversions_leads[creative_id]}")
+                
+                # Log tr32 final count from conversions log
+                if 'tr32' in conversions_leads:
+                    logger.info(f"tr32 CONVERSIONS LOG total leads: {conversions_leads['tr32']}")
+                else:
+                    logger.warning("tr32 NOT FOUND in conversions log")
+            else:
+                logger.warning("No conversions log data received")
+            
             # Process and aggregate main data by creative (accurate metrics)
             creatives_data = {}
             processed_rows = 0
             skipped_rows = 0
+            tr32_rows_count = 0
             
             for row in data['rows']:
                 creative_id = row.get('sub_id_4', 'unknown')
@@ -1091,6 +1164,11 @@ class KeitaroClient:
                 clicks = int(row.get('clicks', 0))
                 unique_clicks = int(row.get('global_unique_clicks', 0))
                 leads_to_add = int(row.get('leads', 0))
+                
+                # Count tr32 rows to see if we're missing data
+                if creative_id == 'tr32':
+                    tr32_rows_count += 1
+                    logger.info(f"tr32 RAW row #{tr32_rows_count}: buyer={buyer}, clicks={clicks}, unique_clicks={unique_clicks}, leads={leads_to_add}, revenue={row.get('revenue', 0)}")
                 
                 # Initialize creative data if not exists
                 if creative_id not in creatives_data:
@@ -1116,7 +1194,9 @@ class KeitaroClient:
                 
                 # Debug tr32 leads aggregation
                 if creative_id == 'tr32':
-                    logger.info(f"tr32 row: buyer={buyer}, leads={leads_to_add}, total_leads_so_far={creatives_data[creative_id]['leads']}, total_revenue={creatives_data[creative_id]['revenue']}")
+                    logger.info(f"tr32 AGGREGATED after row #{tr32_rows_count}: total_leads={creatives_data[creative_id]['leads']}, total_revenue={creatives_data[creative_id]['revenue']}")
+            
+            logger.info(f"tr32 processing summary: found {tr32_rows_count} raw rows for tr32")
             
             # Calculate metrics and format result
             result = []
@@ -1136,6 +1216,20 @@ class KeitaroClient:
                 countries = creative_countries.get(creative_id, set())
                 geos_string = ', '.join(sorted(countries)) if countries else 'Unknown'
                 
+                # Use conversions log leads if available and different (more accurate)
+                final_leads = data['leads']
+                conversions_log_leads = conversions_leads.get(creative_id, 0)
+                if conversions_log_leads > 0:
+                    # Use conversions log data as it's more accurate
+                    final_leads = conversions_log_leads
+                    
+                    # Log if there's a discrepancy for tr32
+                    if creative_id == 'tr32' and conversions_log_leads != data['leads']:
+                        logger.info(f"tr32 LEADS DISCREPANCY: report_api={data['leads']}, conversions_log={conversions_log_leads}, using={final_leads}")
+                
+                # Recalculate dep_to_reg with final leads
+                dep_to_reg = (data['deposits'] / final_leads * 100) if final_leads > 0 else 0
+                
                 result.append({
                     'creative_id': creative_id,
                     'buyer_id': data['buyer_id'],
@@ -1143,7 +1237,7 @@ class KeitaroClient:
                     'clicks': data['clicks'],
                     'unique_clicks': data['unique_clicks'],
                     'conversions': data['conversions'],
-                    'leads': data['leads'],
+                    'leads': final_leads,  # Use the more accurate count
                     'deposits': data['deposits'],
                     'revenue': data['revenue'],
                     'dep_to_reg': dep_to_reg,
