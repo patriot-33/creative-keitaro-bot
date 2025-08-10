@@ -459,12 +459,8 @@ class KeitaroClient:
                     "name": "postback_datetime",  # Use postback_datetime for accurate CSV matching
                     "operator": "BETWEEN",
                     "expression": [start_date, end_date]
-                },
-                {
-                    "name": "status",
-                    "operator": "EQUALS", 
-                    "expression": "sale"  # Only sales status to match CSV export
                 }
+                # Remove status filter to get both leads and sales
             ],
             "sort": [
                 {"name": "postback_datetime", "order": "DESC"}
