@@ -1010,6 +1010,10 @@ class KeitaroClient:
                     datetime_str = row.get('datetime', '')
                     clicks = int(row.get('clicks', 0))
                     
+                    # ДИАГНОСТИКА: логируем все попытки обработки для tr32
+                    if creative_id == 'tr32':
+                        logger.info(f"tr32 processing attempt: clicks={clicks}, datetime={datetime_str}, threshold_check={clicks >= 10}")
+                    
                     if clicks >= 10 and datetime_str:  # ИСПРАВЛЕНИЕ: активный день требует минимум 10 кликов
                         # Extract date part
                         try:
