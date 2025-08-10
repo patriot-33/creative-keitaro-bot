@@ -840,6 +840,11 @@ async def handle_creatives_period_selection(callback: CallbackQuery, state: FSMC
         traffic_source=traffic_source
     )
     
+    # CRITICAL DEBUG: Verify period was saved
+    debug_data = await state.get_data()
+    logger.info(f"PERIOD SAVE CHECK - Data after update: {debug_data}")
+    logger.info(f"PERIOD SAVE CHECK - Period value: {debug_data.get('period', 'MISSING!')}")
+    
     # Создаем клавиатуру для выбора байера
     keyboard_buttons = []
     
@@ -897,6 +902,7 @@ async def handle_creatives_buyer_selection(callback: CallbackQuery, state: FSMCo
     period = user_data.get("period", "yesterday")
     
     logger.info(f"creo_buyer handler: action={action}, period_from_state={period}, callback={callback.data}")
+    logger.info(f"BUYER HANDLER DEBUG - Full state: {user_data}")
     
     if action == "select":
         # Показываем список байеров для выбора
@@ -1039,6 +1045,7 @@ async def handle_creatives_geo_selection(callback: CallbackQuery, state: FSMCont
     period = user_data.get("period", "yesterday")
     
     logger.info(f"creo_geo handler: action={action}, period_from_state={period}, callback={callback.data}")
+    logger.info(f"GEO HANDLER DEBUG - Full state: {user_data}")
     
     if action == "select":
         # Показываем список гео для выбора
@@ -1174,6 +1181,7 @@ async def handle_creatives_show_report(callback: CallbackQuery, state: FSMContex
     period = user_data.get("period", "yesterday")
     
     logger.info(f"creo_show handler: metric={metric}, period_from_state={period}, callback={callback.data}")
+    logger.info(f"SHOW HANDLER DEBUG - Full state: {user_data}")
     
     # Сохраняем метрику для возможности пересортировки
     await state.update_data(current_metric=metric)
