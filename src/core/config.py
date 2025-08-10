@@ -95,7 +95,10 @@ class Settings(BaseSettings):
     
     @validator("allowed_users", pre=True)
     def parse_allowed_users(cls, v):
-        """Parse initial whitelist from string format"""
+        """Parse initial whitelist from string format
+        Format: tg_id:role:buyer_id:username
+        Example: 99006770:owner::PlantatorBob,115031094:owner::username2
+        """
         if isinstance(v, dict):
             return v  # Already parsed
         if not v:
@@ -110,7 +113,13 @@ class Settings(BaseSettings):
                 tg_id = int(parts[0])
                 role = parts[1]
                 buyer_id = parts[2] if len(parts) > 2 and parts[2] else None
-                users[tg_id] = {"role": role, "buyer_id": buyer_id}
+                username = parts[3] if len(parts) > 3 and parts[3] else None
+                users[tg_id] = {
+                    "role": role, 
+                    "buyer_id": buyer_id,
+                    "username": username,
+                    "is_approved": True
+                }
         return users
     
     @property

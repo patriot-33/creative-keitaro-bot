@@ -219,7 +219,7 @@ async def cmd_register(message: Message, state: FSMContext):
     user_id = message.from_user.id
     
     # Проверяем, не зарегистрирован ли уже
-    users = load_users()
+    users = settings.allowed_users
     if user_id in users:
         await message.answer("✅ Вы уже зарегистрированы в системе!")
         return
@@ -447,7 +447,7 @@ async def cmd_users(message: Message):
         await message.answer("❌ Недостаточно прав для выполнения команды.")
         return
     
-    users = load_users()
+    users = settings.allowed_users
     
     if not users:
         await message.answer("📝 Список пользователей пуст.")
@@ -532,7 +532,7 @@ async def cmd_add_user(message: Message):
     buyer_id = args[2] if len(args) > 2 else None
     
     # Загружаем и обновляем список пользователей
-    users = load_users()
+    users = settings.allowed_users
     
     if tg_id in users:
         await message.answer(f"⚠️ Пользователь {tg_id} уже существует!\nИспользуйте /edit_user для изменения.")
@@ -599,7 +599,7 @@ async def cmd_remove_user(message: Message):
         await message.answer("❌ Telegram ID должен быть числом!")
         return
     
-    users = load_users()
+    users = settings.allowed_users
     
     if tg_id not in users:
         await message.answer(f"❌ Пользователь {tg_id} не найден!")
@@ -665,7 +665,7 @@ async def cmd_edit_user(message: Message):
     
     buyer_id = args[2] if len(args) > 2 else None
     
-    users = load_users()
+    users = settings.allowed_users
     
     if tg_id not in users:
         await message.answer(f"❌ Пользователь {tg_id} не найден!\nИспользуйте /add_user для добавления.")
@@ -829,7 +829,7 @@ async def handle_approve_user(callback: CallbackQuery):
     
     if db_save_success:
         # Дополнительно сохраняем в JSON файл для обратной совместимости
-        users = load_users()
+        users = settings.allowed_users
         users[target_id] = {
             'role': role,
             'buyer_id': user_info.get('buyer_id'),
@@ -967,7 +967,7 @@ async def cmd_reload_users(message: Message):
     
     try:
         # Обновляем конфиг
-        users = load_users()
+        users = settings.allowed_users
         settings.allowed_users = users
         
         await message.answer(
@@ -994,7 +994,7 @@ async def cmd_manage_users(message: Message):
         return
     
     # Получаем статистику
-    users = load_users()
+    users = settings.allowed_users
     pending = load_pending_users()
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -1042,7 +1042,7 @@ async def handle_btn_users_list(callback: CallbackQuery):
         await callback.answer("❌ Недостаточно прав!", show_alert=True)
         return
     
-    users = load_users()
+    users = settings.allowed_users
     
     if not users:
         await callback.message.edit_text("📝 Список пользователей пуст.")
@@ -1067,19 +1067,27 @@ async def handle_btn_users_list(callback: CallbackQuery):
     for tg_id, user_info in sorted_users[:10]:  # Показываем первые 10
         role = user_info.get('role', 'unknown')
         buyer_id = user_info.get('buyer_id', '')
+        username = user_info.get('username', '')
         
         role_display = role_names.get(role, f"❓ {role}")
         buyer_display = f" | {buyer_id}" if buyer_id else ""
+        username_display = f" (@{username})" if username else ""
         
-        text += f"• <code>{tg_id}</code> - {role_display}{buyer_display}\n"
+        text += f"• <code>{tg_id}</code>{username_display} - {role_display}{buyer_display}\n"
         
         # Проверяем права на удаление
         can_delete = can_delete_user(user_id, role, tg_id)
         
         if can_delete:
+            button_text = f"❌ {tg_id}"
+            if username:
+                button_text += f" (@{username})"
+            elif buyer_id:
+                button_text += f" | {buyer_id}"
+            
             keyboards.append([
                 InlineKeyboardButton(
-                    text=f"❌ {tg_id}{'|' + buyer_id if buyer_id else ''}",
+                    text=button_text,
                     callback_data=f"delete_user_{tg_id}"
                 )
             ])
@@ -1102,7 +1110,7 @@ async def handle_delete_user_confirm(callback: CallbackQuery):
     admin_id = callback.from_user.id
     target_id = int(callback.data.replace("delete_user_", ""))
     
-    users = load_users()
+    users = settings.allowed_users
     
     if target_id not in users:
         await callback.answer("❌ Пользователь не найден!", show_alert=True)
@@ -1152,7 +1160,7 @@ async def handle_confirm_delete_user(callback: CallbackQuery):
     admin_id = callback.from_user.id
     target_id = int(callback.data.replace("confirm_delete_", ""))
     
-    users = load_users()
+    users = settings.allowed_users
     
     if target_id not in users:
         await callback.answer("❌ Пользователь не найден!", show_alert=True)
@@ -1199,7 +1207,7 @@ async def handle_btn_refresh_manage(callback: CallbackQuery):
 
 def can_delete_user(admin_id: int, target_role: str, target_id: int) -> bool:
     """Проверка прав на удаление пользователя"""
-    users = load_users()
+    users = settings.allowed_users
     admin_info = users.get(admin_id, {})
     admin_role = admin_info.get('role', '')
     
