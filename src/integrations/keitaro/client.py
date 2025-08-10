@@ -24,13 +24,28 @@ class KeitaroClient:
         
     async def __aenter__(self):
         """Async context manager entry"""
-        self.session = aiohttp.ClientSession()
+        # Создаем коннектор с правильной конфигурацией
+        connector = aiohttp.TCPConnector(
+            limit=100,
+            limit_per_host=30,
+            ttl_dns_cache=300,
+            use_dns_cache=True,
+            keepalive_timeout=30,
+            enable_cleanup_closed=True
+        )
+        
+        self.session = aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=30)
+        )
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit"""
         if self.session:
             await self.session.close()
+            # Дополнительно даем время на очистку соединений
+            await asyncio.sleep(0.1)
             
     async def _make_request(
         self, 

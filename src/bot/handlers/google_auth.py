@@ -38,7 +38,11 @@ async def cmd_google_auth(message: Message):
     
     # Check current authorization status
     try:
-        async with aiohttp.ClientSession() as session:
+        connector = aiohttp.TCPConnector(enable_cleanup_closed=True)
+        async with aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=10)
+        ) as session:
             async with session.get(
                 f"{settings.google_oauth_redirect_uri.replace('/auth/google/callback', '')}/auth/google/status",
                 params={'user_id': str(user.id)}
@@ -97,7 +101,11 @@ async def handle_start_google_auth(callback: CallbackQuery):
     
     try:
         # Request auth URL from OAuth server
-        async with aiohttp.ClientSession() as session:
+        connector = aiohttp.TCPConnector(enable_cleanup_closed=True)
+        async with aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=10)
+        ) as session:
             async with session.get(
                 f"{settings.google_oauth_redirect_uri.replace('/auth/google/callback', '')}/auth/google/start",
                 params={'user_id': user_id}
@@ -158,7 +166,11 @@ async def handle_check_auth_status(callback: CallbackQuery):
         return
     
     try:
-        async with aiohttp.ClientSession() as session:
+        connector = aiohttp.TCPConnector(enable_cleanup_closed=True)
+        async with aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=10)
+        ) as session:
             async with session.get(
                 f"{settings.google_oauth_redirect_uri.replace('/auth/google/callback', '')}/auth/google/status",
                 params={'user_id': user_id}
