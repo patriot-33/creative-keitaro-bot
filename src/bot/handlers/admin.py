@@ -136,6 +136,15 @@ async def save_user_to_database(user_id: int, user_data: dict, approved_by_id: i
                 if approved_by_id:
                     existing_user.created_by_id = approved_by_id
             else:
+                # Проверяем, существует ли approved_by_id в БД
+                created_by_id = None
+                if approved_by_id:
+                    approver_result = await session.execute(select(User).where(User.tg_user_id == approved_by_id))
+                    if approver_result.scalar_one_or_none():
+                        created_by_id = approved_by_id
+                    else:
+                        logger.warning(f"Approver {approved_by_id} not found in DB, setting created_by_id=None")
+                
                 # Создаем нового пользователя
                 new_user = User(
                     tg_user_id=user_id,
@@ -144,7 +153,7 @@ async def save_user_to_database(user_id: int, user_data: dict, approved_by_id: i
                     role=UserRole(user_data['role']),
                     buyer_id=user_data.get('buyer_id') if user_data.get('buyer_id') else None,
                     is_active=True,
-                    created_by_id=approved_by_id
+                    created_by_id=created_by_id
                 )
                 session.add(new_user)
             

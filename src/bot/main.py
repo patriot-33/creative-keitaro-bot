@@ -193,7 +193,11 @@ async def load_users_from_database():
             env_users = settings.allowed_users.copy() if hasattr(settings, 'allowed_users') and settings.allowed_users else {}
             
             # Синхронизируем ENV пользователей в БД (чтобы избежать FK ошибок)
-            await sync_file_users_to_database(session, env_users)
+            try:
+                await sync_file_users_to_database(session, env_users)
+                logger.info(f"Synced {len(env_users)} ENV users to database")
+            except Exception as sync_error:
+                logger.error(f"Failed to sync ENV users to database: {sync_error}")
             
             # Объединяем БД пользователей с ENV пользователями (ENV имеет приоритет)
             for env_user_id, env_user_data in env_users.items():
@@ -228,6 +232,7 @@ async def sync_file_users_to_database(session, file_users):
     """Синхронизация пользователей из файла в базу данных"""
     from db.models.user import User
     from sqlalchemy import select
+    from core.enums import UserRole
     
     for tg_id, user_data in file_users.items():
         # Проверяем, существует ли пользователь
