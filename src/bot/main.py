@@ -14,7 +14,7 @@ sys.path.insert(0, str(project_root))
 from core.config import settings
 from db.database import engine
 from db.models import Base
-from bot.handlers import reports, admin, upload
+from bot.handlers import reports, admin, upload, google_auth
 
 # Configure logging
 logging.basicConfig(
@@ -31,6 +31,7 @@ dp = Dispatcher(storage=MemoryStorage())
 dp.include_router(reports.router)
 dp.include_router(admin.router)
 dp.include_router(upload.router)
+dp.include_router(google_auth.router)
 
 
 @dp.message(Command("start"))
@@ -107,6 +108,7 @@ async def cmd_start(message: Message):
 📊 <b>Основные команды:</b>
 /reports - 📊 Система отчетов (новая!)
 /upload - Загрузить креатив
+/google_auth - 🔐 Авторизация Google Drive
 /stats_creo - Статистика креативов
 /stats_buyer - Статистика по баерам
 /stats_geo_offer - Статистика GEO/офферов

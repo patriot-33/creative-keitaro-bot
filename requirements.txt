@@ -1,6 +1,7 @@
 # Core bot framework
 aiogram==3.4.1
 aiohttp==3.9.3
+aiohttp-cors==0.7.0
 
 # Web framework (for health checks)
 fastapi==0.109.0

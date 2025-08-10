@@ -1,5 +1,6 @@
 from typing import Optional, List, TYPE_CHECKING
-from sqlalchemy import String, BigInteger, Boolean, ForeignKey, Enum
+from datetime import datetime
+from sqlalchemy import String, BigInteger, Boolean, ForeignKey, Enum, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import sys
 from pathlib import Path
@@ -31,6 +32,13 @@ class User(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("users.id"), nullable=True
+    )
+    
+    # Google Drive OAuth fields
+    google_access_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    google_refresh_token: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    google_token_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     # Relationships

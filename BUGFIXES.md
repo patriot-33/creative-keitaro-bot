@@ -363,23 +363,68 @@ drive_result = {
 ✅ Ссылки будут работать корректно
 ✅ SHA256 хэш будет рассчитываться Google Drive Service
 
-### Дополнительное исправление - Fallback при ошибках Google Drive:
-**Проблема**: Google Drive не настроен на production (GOOGLE_DRIVE_ROOT_FOLDER_ID = "temp-folder-id")
-**Решение**: Добавлен fallback к временным ссылкам при ошибке Google Drive
+---
 
-```python
-try:
-    # Пробуем реальную загрузку в Google Drive
-    google_drive = GoogleDriveService()
-    file_id, web_view_link, sha256_hash_gdrive = await google_drive.upload_file(...)
-except Exception as gdrive_error:
-    logger.warning(f"Google Drive upload failed: {gdrive_error}")
-    # Fallback к временным ссылкам
-    drive_result = {
-        'file_id': f"temp_drive_id_{creative_id}",
-        'web_view_link': f"https://drive.google.com/file/d/temp_{creative_id}/view"
-    }
+## Баг #13: Service Account storage quota exceeded
+
+### Проблема:
+**Дата**: 2025-08-10
+**Симптомы**: 
+- Google Drive папки создаются успешно
+- Но файлы не сохраняются с ошибкой 403 Forbidden
+- "Service Accounts do not have storage quota"
+
+### Причина:
+Service Account не имеет собственного хранилища Google Drive:
 ```
+403 Forbidden with reason "storageQuotaExceeded"
+Service Accounts do not have storage quota. Leverage shared drives 
+or use OAuth delegation instead.
+```
+
+### Решение: Реализация OAuth delegation
+Полная реализация OAuth авторизации пользователей:
+
+**1. Обновлена модель User:**
+```python
+# Добавлены поля для OAuth токенов
+google_access_token: Mapped[Optional[str]]
+google_refresh_token: Mapped[Optional[str]] 
+google_token_expires_at: Mapped[Optional[datetime]]
+```
+
+**2. Создан OAuthGoogleDriveService:**
+- Использует пользовательские OAuth токены
+- Автоматический refresh токенов
+- Сохранение файлов в аккаунт пользователя
+
+**3. Веб-сервер для OAuth callbacks:**
+- `/auth/google/start` - начало авторизации
+- `/auth/google/callback` - получение токенов
+- `/auth/google/status` - проверка статуса
+
+**4. Telegram команда /google_auth:**
+- Пошаговая авторизация через браузер
+- Проверка статуса авторизации
+- Интеграция с основным меню
+
+**5. Обновлен upload workflow:**
+- Проверка OAuth токенов перед загрузкой
+- Автоматический refresh истекших токенов
+- Fallback к временным ссылкам если не авторизован
+
+### Архитектура:
+```
+Telegram Bot ← → OAuth Web Server ← → Google Drive API
+     ↓                    ↓
+Database User.tokens → User's Google Drive
+```
+
+### Следующие шаги:
+1. **Google Cloud Console:** Создать OAuth 2.0 Client ID
+2. **Environment Variables:** Добавить GOOGLE_OAUTH_CLIENT_ID/SECRET  
+3. **Deploy:** Запустить с OAuth web server
+4. **Test:** /google_auth → авторизация → /upload
 
 ---
 

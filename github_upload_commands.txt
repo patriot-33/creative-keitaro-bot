@@ -1,0 +1,18 @@
+# Команды для загрузки на GitHub
+
+# 1. Сначала создайте репозиторий на GitHub через веб-интерфейс:
+#    https://github.com/new
+#    Название: creative-keitaro-bot
+
+# 2. Затем выполните эти команды в терминале:
+
+# Добавить remote (замените YOUR_USERNAME на ваш username)
+git remote add origin https://github.com/YOUR_USERNAME/creative-keitaro-bot.git
+
+# Проверить remote
+git remote -v
+
+# Загрузить на GitHub
+git push -u origin main
+
+# При запросе пароля используйте ваш Personal Access Token

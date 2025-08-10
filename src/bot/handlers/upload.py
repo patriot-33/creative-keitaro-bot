@@ -424,11 +424,36 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         logger.info(f"File details: name={file_name}, size={len(file_bytes)} bytes, mime={mime_type}, geo={geo}")
         
         try:
-            from integrations.google.drive import GoogleDriveService
+            # Check if user has OAuth tokens
+            from db.models.user import User
+            from db.database import get_db_session
+            from sqlalchemy import select
+            from integrations.google.oauth_drive import OAuthGoogleDriveService
+            from datetime import datetime
             
-            logger.info("Initializing GoogleDriveService...")
-            google_drive = GoogleDriveService()
-            logger.info(f"GoogleDriveService initialized with root folder: {google_drive.root_folder_id}")
+            logger.info("Checking user's Google OAuth status...")
+            
+            async with get_db_session() as session:
+                user_stmt = select(User).where(User.tg_user_id == user.id)
+                user_result = await session.execute(user_stmt)
+                db_user = user_result.scalar_one_or_none()
+                
+                if not db_user or not db_user.google_access_token or not db_user.google_refresh_token:
+                    raise Exception("User not authorized with Google Drive. Use /google_auth first.")
+                
+                # Check if token is expired
+                if db_user.google_token_expires_at and db_user.google_token_expires_at <= datetime.utcnow():
+                    logger.warning("Google token expired, user needs to re-authorize")
+                    raise Exception("Google Drive authorization expired. Use /google_auth to re-authorize.")
+            
+            logger.info("User has valid Google OAuth tokens")
+            logger.info("Initializing OAuthGoogleDriveService...")
+            
+            google_drive = OAuthGoogleDriveService(
+                user_access_token=db_user.google_access_token,
+                user_refresh_token=db_user.google_refresh_token
+            )
+            logger.info(f"OAuthGoogleDriveService initialized with root folder: {google_drive.root_folder_id}")
             
             logger.info("Calling google_drive.upload_file()...")
             file_id, web_view_link, sha256_hash_gdrive = await google_drive.upload_file(
@@ -443,11 +468,24 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
                 'file_id': file_id,
                 'web_view_link': web_view_link
             }
-            logger.info(f"Google Drive upload SUCCESS!")
+            logger.info(f"OAuth Google Drive upload SUCCESS!")
             logger.info(f"  - File ID: {file_id}")
             logger.info(f"  - Web View Link: {web_view_link}")
             logger.info(f"  - SHA256: {sha256_hash_gdrive[:16]}...")
-            logger.info(f"  - Root Folder ID: {google_drive.root_folder_id}")
+            logger.info(f"  - User: {user.first_name} ({user.id})")
+            
+            # Update user's token if it was refreshed
+            if google_drive.credentials.token != db_user.google_access_token:
+                logger.info("Updating refreshed Google tokens")
+                async with get_db_session() as session:
+                    user_stmt = select(User).where(User.tg_user_id == user.id)
+                    user_result = await session.execute(user_stmt)
+                    db_user = user_result.scalar_one_or_none()
+                    if db_user:
+                        db_user.google_access_token = google_drive.credentials.token
+                        if google_drive.credentials.expiry:
+                            db_user.google_token_expires_at = google_drive.credentials.expiry
+                        await session.commit()
             
         except Exception as gdrive_error:
             logger.warning(f"Google Drive upload failed: {gdrive_error}")

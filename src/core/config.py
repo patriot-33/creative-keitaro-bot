@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     google_drive_root_folder_id: str
     google_sheets_manifest_id: str
     
+    # Google OAuth
+    google_oauth_client_id: str
+    google_oauth_client_secret: str
+    google_oauth_redirect_uri: str = "https://creative-keitaro-bot.onrender.com/auth/google/callback"
+    
     # Keitaro
     keitaro_base_url: str
     keitaro_api_token: str
