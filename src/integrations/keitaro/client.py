@@ -977,6 +977,7 @@ class KeitaroClient:
             
             logger.info(f"=== ACTIVE DAYS REQUEST ===")
             logger.info(f"Active days API params: {active_days_params}")
+            logger.info(f"SYNC CHECK: Active days using same dates: {start_date} - {end_date}")
             
             active_days_data = await self._make_request('/admin_api/v1/report/build', method='POST', json=active_days_params)
             logger.info(f"Active days API response keys: {list(active_days_data.keys()) if active_days_data else 'None'}")
@@ -1002,7 +1003,7 @@ class KeitaroClient:
                     datetime_str = row.get('datetime', '')
                     clicks = int(row.get('clicks', 0))
                     
-                    if clicks > 0 and datetime_str:
+                    if clicks >= 10 and datetime_str:  # ИСПРАВЛЕНИЕ: активный день требует минимум 10 кликов
                         # Extract date part
                         try:
                             date_part = datetime_str.split('T')[0] if 'T' in datetime_str else datetime_str.split(' ')[0]
@@ -1053,6 +1054,7 @@ class KeitaroClient:
             
             logger.info(f"=== GEO REQUEST ===")
             logger.info(f"Geo API params: {geo_params}")
+            logger.info(f"SYNC CHECK: Geo using same dates: {start_date} - {end_date}")
             
             geo_data = await self._make_request('/admin_api/v1/report/build', method='POST', json=geo_params)
             
@@ -1119,6 +1121,7 @@ class KeitaroClient:
             
             logger.info(f"=== CONVERSIONS LOG REQUEST (for validation) ===")
             logger.info(f"Conversions API params: {conversions_params}")
+            logger.info(f"SYNC CHECK: Conversions using same dates: {start_date} - {end_date}")
             
             conversions_data = await self._make_request('/admin_api/v1/conversions/log', method='POST', json=conversions_params)
             
@@ -1232,16 +1235,15 @@ class KeitaroClient:
                 countries = creative_countries.get(creative_id, set())
                 geos_string = ', '.join(sorted(countries)) if countries else 'Unknown'
                 
-                # Use conversions log leads if available and different (more accurate)
-                final_leads = data['leads']
+                # ИСПРАВЛЕНИЕ 2: Всегда используем conversions log как единственный источник истины для регистраций
                 conversions_log_leads = conversions_leads.get(creative_id, 0)
-                if conversions_log_leads > 0:
-                    # Use conversions log data as it's more accurate
-                    final_leads = conversions_log_leads
-                    
-                    # Log if there's a discrepancy for tr32
-                    if creative_id == 'tr32' and conversions_log_leads != data['leads']:
-                        logger.info(f"tr32 LEADS DISCREPANCY: report_api={data['leads']}, conversions_log={conversions_log_leads}, using={final_leads}")
+                final_leads = conversions_log_leads if conversions_log_leads > 0 else data['leads']
+                
+                # Логируем расхождения для диагностики
+                if conversions_log_leads != data['leads']:
+                    logger.info(f"{creative_id} LEADS: report_api={data['leads']}, conversions_log={conversions_log_leads}, using_final={final_leads}")
+                    if creative_id == 'tr32':
+                        logger.info(f"tr32 CRITICAL: Using conversions_log as single source of truth")
                 
                 # Recalculate dep_to_reg with final leads
                 dep_to_reg = (data['deposits'] / final_leads * 100) if final_leads > 0 else 0
