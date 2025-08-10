@@ -941,6 +941,7 @@ class KeitaroClient:
             logger.info(f"Main API returned {len(data.get('rows', []))} raw rows")
             
             # SECOND REQUEST: Get active days data (with datetime grouping)
+            # Note: Some rows have empty sub_id_4, so we need to be more flexible
             active_days_params = {
                 'metrics': ['clicks'],  # Just need clicks to count active days
                 'columns': ['sub_id_4', 'datetime'],
@@ -948,6 +949,20 @@ class KeitaroClient:
                 'grouping': ['sub_id_4', 'datetime'],
                 'limit': 10000
             }
+            
+            # Also try to get data with only sub_id_4 filter (no empty values)
+            for filter_item in active_days_params['filters']:
+                if filter_item['name'] == 'datetime':
+                    continue  # Keep datetime filter
+                elif filter_item['name'] == 'ts_id':
+                    continue  # Keep traffic source filter
+            
+            # Add filter to exclude empty sub_id_4 values
+            active_days_params['filters'].append({
+                'name': 'sub_id_4',
+                'operator': 'NOT_EQUALS',
+                'expression': ''
+            })
             
             logger.info(f"=== ACTIVE DAYS REQUEST ===")
             logger.info(f"Active days API params: {active_days_params}")
@@ -967,7 +982,10 @@ class KeitaroClient:
                 
                 for row in active_days_data['rows']:
                     creative_id = row.get('sub_id_4', 'unknown')
-                    if creative_id == 'unknown' or not creative_id:
+                    # Skip empty or invalid creative IDs
+                    if (creative_id == 'unknown' or not creative_id or 
+                        creative_id in ['', ' ', 'null', '{sub_id_4}'] or
+                        str(creative_id).strip() == ''):
                         continue
                     
                     datetime_str = row.get('datetime', '')
@@ -987,6 +1005,10 @@ class KeitaroClient:
                         # Log tr32 specifically
                         if creative_id == 'tr32':
                             logger.info(f"tr32 active day found: date={date_part}, clicks={clicks}")
+                            
+                        # Log first few valid creatives for debugging
+                        if len(creative_active_days) <= 3:
+                            logger.info(f"Active day found for {creative_id}: date={date_part}, clicks={clicks}")
                 
                 # Log tr32 final count
                 if 'tr32' in creative_active_days:
