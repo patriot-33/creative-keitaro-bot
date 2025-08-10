@@ -440,9 +440,14 @@ async def handle_buyers_select(callback: CallbackQuery, state: FSMContext):
                 ))
             keyboard_buttons.append(row)
         
-        # Добавляем кнопку "Назад"
+        # Добавляем кнопку "Назад" с сохранением источника трафика
+        if data.get('traffic_source'):
+            back_callback = f"period_buyers_{data['traffic_source']}_{period}"
+        else:
+            back_callback = f"period_buyers_{period}"
+        
         keyboard_buttons.append([
-            InlineKeyboardButton(text="↩️ Назад к фильтрам", callback_data=f"period_buyers_{period}")
+            InlineKeyboardButton(text="↩️ Назад к фильтрам", callback_data=back_callback)
         ])
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)

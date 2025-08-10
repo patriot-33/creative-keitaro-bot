@@ -168,9 +168,9 @@ class ReportsKeyboards:
         
         # Кнопка назад
         if traffic_source:
-            back_callback = f"period_buyers_{traffic_source}"
+            back_callback = f"trafficsrc_buyers_{traffic_source}"  # Возвращаемся к выбору периода
         else:
-            back_callback = f"period_buyers"
+            back_callback = "reports_buyers"  # Возвращаемся к выбору источника
             
         builder.row(
             InlineKeyboardButton(
