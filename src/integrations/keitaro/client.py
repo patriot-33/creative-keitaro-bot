@@ -888,10 +888,10 @@ class KeitaroClient:
             logger.info(f"Date range: {start_date} - {end_date}")
             
             # Build report params with sub_id_4 for creative ID
-            # Use simpler grouping for better unique clicks accuracy
+            # Include datetime in grouping to calculate active days
             report_params = {
                 'metrics': ['clicks', 'global_unique_clicks', 'conversions', 'leads', 'sales', 'revenue'],
-                'columns': ['sub_id_4', 'sub_id_1', 'country'],
+                'columns': ['sub_id_4', 'sub_id_1', 'country', 'datetime'],
                 'filters': [
                     {
                         'name': 'datetime',
@@ -899,7 +899,7 @@ class KeitaroClient:
                         'expression': [start_date, end_date]
                     }
                 ],
-                'grouping': ['sub_id_4', 'sub_id_1', 'country'],
+                'grouping': ['sub_id_4', 'sub_id_1', 'country', 'datetime'],
                 'sort': [{'name': 'revenue', 'order': 'DESC'}],
                 'limit': 10000
             }
@@ -941,7 +941,7 @@ class KeitaroClient:
             
             logger.info(f"API returned {len(data.get('rows', []))} raw rows")
             
-            # Process and aggregate data by creative (simplified without datetime)
+            # Process and aggregate data by creative (with date tracking for active days)
             creatives_data = {}
             processed_rows = 0
             skipped_rows = 0
@@ -965,8 +965,19 @@ class KeitaroClient:
                     buyer = 'unknown'
                 
                 country = row.get('country', 'unknown')
+                datetime_str = row.get('datetime', '')
                 clicks = int(row.get('clicks', 0))
                 unique_clicks = int(row.get('global_unique_clicks', 0))
+                
+                # Extract date for active days calculation
+                if datetime_str:
+                    try:
+                        # Extract date part (YYYY-MM-DD) from datetime string
+                        date_part = datetime_str.split('T')[0] if 'T' in datetime_str else datetime_str.split(' ')[0]
+                    except:
+                        date_part = datetime_str
+                else:
+                    date_part = 'unknown'
                 
                 # Initialize creative data if not exists
                 if creative_id not in creatives_data:
@@ -980,7 +991,7 @@ class KeitaroClient:
                         'leads': 0,
                         'deposits': 0,  # sales = deposits
                         'revenue': 0.0,
-                        'active_days': 1  # Since we don't have daily data, assume 1 active day
+                        'active_dates': set()  # Track unique dates for active days
                     }
                 
                 # Aggregate data
@@ -991,6 +1002,10 @@ class KeitaroClient:
                 creatives_data[creative_id]['leads'] += int(row.get('leads', 0))
                 creatives_data[creative_id]['deposits'] += int(row.get('sales', 0))
                 creatives_data[creative_id]['revenue'] += float(row.get('revenue', 0))
+                
+                # Track active dates (only add if there were clicks)
+                if clicks > 0 and date_part != 'unknown':
+                    creatives_data[creative_id]['active_dates'].add(date_part)
             
             # Calculate metrics and format result
             result = []
@@ -1000,6 +1015,11 @@ class KeitaroClient:
                 
                 # Calculate conversion rates
                 dep_to_reg = (data['deposits'] / data['leads'] * 100) if data['leads'] > 0 else 0
+                
+                # Calculate active days from unique dates
+                active_days = len(data['active_dates'])
+                if active_days == 0:
+                    active_days = 1  # Default to 1 if no dates tracked
                 
                 result.append({
                     'creative_id': creative_id,
@@ -1013,7 +1033,7 @@ class KeitaroClient:
                     'revenue': data['revenue'],
                     'dep_to_reg': dep_to_reg,
                     'uepc': uepc,
-                    'active_days': data['active_days']
+                    'active_days': active_days
                 })
             
             # Don't sort here - let the service handle sorting
