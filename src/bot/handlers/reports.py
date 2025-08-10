@@ -892,17 +892,32 @@ async def handle_creatives_buyer_selection(callback: CallbackQuery, state: FSMCo
     """Обработка выбора байера для отчета по креативам"""
     parts = callback.data.split("_")
     
-    if len(parts) < 4:
+    if len(parts) < 3:
         await callback.answer("❌ Некорректные данные")
         return
     
     action = parts[2]  # all или select
-    # Получаем реальный период из state, а не из callback
-    user_data = await state.get_data()
-    period = user_data.get("period", "yesterday")
     
-    logger.info(f"creo_buyer handler: action={action}, period_from_state={period}, callback={callback.data}")
-    logger.info(f"BUYER HANDLER DEBUG - Full state: {user_data}")
+    # ИСПРАВЛЕНИЕ: Получаем период из callback, т.к. FSM state сбрасывается
+    if len(parts) >= 4:
+        period = parts[3]  # Период из callback
+        logger.info(f"Period from callback: {period}")
+    else:
+        # Fallback: пытаемся найти период в callback data
+        callback_str = callback.data
+        period_match = None
+        valid_periods = ["today", "yesterday", "last3days", "last7days", "last15days", "thismonth", "lastmonth"]
+        for p in valid_periods:
+            if p in callback_str:
+                period_match = p
+                break
+        period = period_match or "yesterday"
+        logger.info(f"Period extracted from callback string: {period}")
+    
+    logger.info(f"creo_buyer handler: action={action}, period={period}, callback={callback.data}")
+    
+    # Сохраняем период в state для последующих использований
+    await state.update_data(period=period)
     
     if action == "select":
         # Показываем список байеров для выбора
@@ -1040,12 +1055,20 @@ async def handle_creatives_geo_selection(callback: CallbackQuery, state: FSMCont
         return
     
     action = parts[2]  # all или select
-    # Получаем реальный период из state, а не из callback
-    user_data = await state.get_data()
-    period = user_data.get("period", "yesterday")
+    # ИСПРАВЛЕНИЕ: Получаем период из callback или state
+    if len(parts) >= 4:
+        period = parts[3]  # Период из callback
+        logger.info(f"Period from callback: {period}")
+    else:
+        # Fallback: пытаемся получить из state (если был сохранен ранее)
+        user_data = await state.get_data()
+        period = user_data.get("period", "yesterday")
+        logger.info(f"Period from state fallback: {period}")
     
-    logger.info(f"creo_geo handler: action={action}, period_from_state={period}, callback={callback.data}")
-    logger.info(f"GEO HANDLER DEBUG - Full state: {user_data}")
+    logger.info(f"creo_geo handler: action={action}, period={period}, callback={callback.data}")
+    
+    # Убеждаемся что период сохранен в state
+    await state.update_data(period=period)
     
     if action == "select":
         # Показываем список гео для выбора
@@ -1171,17 +1194,36 @@ async def handle_creatives_show_report(callback: CallbackQuery, state: FSMContex
     """Показать отчет по креативам"""
     parts = callback.data.split("_")
     
-    if len(parts) < 4:
+    if len(parts) < 3:
         await callback.answer("❌ Некорректные данные")
         return
     
     metric = parts[2]  # uepc, revenue, active
-    # Получаем реальный период из state, а не из callback
-    user_data = await state.get_data()
-    period = user_data.get("period", "yesterday")
     
-    logger.info(f"creo_show handler: metric={metric}, period_from_state={period}, callback={callback.data}")
-    logger.info(f"SHOW HANDLER DEBUG - Full state: {user_data}")
+    # ИСПРАВЛЕНИЕ: Получаем период из callback
+    if len(parts) >= 4:
+        period = parts[3]  # Период из callback
+        logger.info(f"Period from callback: {period}")
+    else:
+        # Fallback: пытаемся найти период в callback data или state
+        callback_str = callback.data
+        period_match = None
+        valid_periods = ["today", "yesterday", "last3days", "last7days", "last15days", "thismonth", "lastmonth"]
+        for p in valid_periods:
+            if p in callback_str:
+                period_match = p
+                break
+        
+        if period_match:
+            period = period_match
+            logger.info(f"Period extracted from callback string: {period}")
+        else:
+            # Последний fallback - из state
+            user_data = await state.get_data()
+            period = user_data.get("period", "yesterday")
+            logger.info(f"Period from state fallback: {period}")
+    
+    logger.info(f"creo_show handler: metric={metric}, period={period}, callback={callback.data}")
     
     # Сохраняем метрику для возможности пересортировки
     await state.update_data(current_metric=metric)
