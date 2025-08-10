@@ -192,6 +192,9 @@ async def load_users_from_database():
             # Добавляем пользователей из ENV переменной ALLOWED_USERS (приоритет)
             env_users = settings.allowed_users.copy() if hasattr(settings, 'allowed_users') and settings.allowed_users else {}
             
+            # Синхронизируем ENV пользователей в БД (чтобы избежать FK ошибок)
+            await sync_file_users_to_database(session, env_users)
+            
             # Объединяем БД пользователей с ENV пользователями (ENV имеет приоритет)
             for env_user_id, env_user_data in env_users.items():
                 users[str(env_user_id)] = env_user_data
