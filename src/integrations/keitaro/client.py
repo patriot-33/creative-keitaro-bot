@@ -1003,8 +1003,9 @@ class KeitaroClient:
                         str(creative_id).strip() == ''):
                         continue
                     
-                    # CRITICAL FIX: Normalize creative_id to lowercase for comparison
-                    creative_id = str(creative_id).lower()
+                    # УБИРАЕМ НОРМАЛИЗАЦИЮ - Keitaro чувствителен к регистру!
+                    # Не нормализуем, чтобы сохранить исходный регистр из API
+                    creative_id = str(creative_id)
                     
                     datetime_str = row.get('datetime', '')
                     clicks = int(row.get('clicks', 0))
@@ -1039,13 +1040,13 @@ class KeitaroClient:
                 logger.info(f"Searching for TR32 in active days data...")
                 tr32_possible_ids = set()  # Соберем все возможные ID для tr32
                 
-                # Проверим сколько дней tr32 имел клики БЕЗ порога
+                # Проверим сколько дней tr32 имел клики БЕЗ порога  
                 tr32_all_days_clicks = {}
                 for row in active_days_data.get('rows', []):
                     creative_id = row.get('sub_id_4', 'unknown')
                     
-                    # Ищем TR32 по разным критериям
-                    if str(creative_id).lower() == 'tr32':
+                    # Ищем tr32 (маленькими буквами) - Keitaro чувствителен к регистру!
+                    if str(creative_id) == 'tr32':
                         tr32_possible_ids.add(creative_id)
                         datetime_str = row.get('datetime', '')
                         clicks = int(row.get('clicks', 0))
