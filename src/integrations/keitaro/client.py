@@ -887,11 +887,10 @@ class KeitaroClient:
             logger.info(f"get_creatives_report called with: period={period}, buyer_id={buyer_id}, geo={geo}, traffic_source_ids={traffic_source_ids}")
             logger.info(f"Date range: {start_date} - {end_date}")
             
-            # Build report params with sub_id_4 for creative ID
-            # Include datetime in grouping to calculate active days
-            report_params = {
+            # FIRST REQUEST: Get main metrics without datetime for accurate aggregation
+            main_report_params = {
                 'metrics': ['clicks', 'global_unique_clicks', 'conversions', 'leads', 'sales', 'revenue'],
-                'columns': ['sub_id_4', 'sub_id_1', 'country', 'datetime'],
+                'columns': ['sub_id_4', 'sub_id_1', 'country'],
                 'filters': [
                     {
                         'name': 'datetime',
@@ -899,14 +898,14 @@ class KeitaroClient:
                         'expression': [start_date, end_date]
                     }
                 ],
-                'grouping': ['sub_id_4', 'sub_id_1', 'country', 'datetime'],
+                'grouping': ['sub_id_4', 'sub_id_1', 'country'],
                 'sort': [{'name': 'revenue', 'order': 'DESC'}],
                 'limit': 10000
             }
             
             # Add buyer filter if specified
             if buyer_id:
-                report_params['filters'].append({
+                main_report_params['filters'].append({
                     'name': 'sub_id_1',
                     'operator': 'EQUALS',
                     'expression': buyer_id
@@ -914,7 +913,7 @@ class KeitaroClient:
             
             # Add geo filter if specified
             if geo:
-                report_params['filters'].append({
+                main_report_params['filters'].append({
                     'name': 'country',
                     'operator': 'EQUALS',
                     'expression': geo
@@ -922,26 +921,67 @@ class KeitaroClient:
             
             # Add traffic source filter if specified
             if traffic_source_ids:
-                report_params['filters'].append({
+                main_report_params['filters'].append({
                     'name': 'ts_id',
                     'operator': 'IN_LIST',
                     'expression': traffic_source_ids
                 })
             
             logger.info(f"Getting creatives report: {start_date} - {end_date}")
-            logger.info(f"API request params: {report_params}")
+            logger.info(f"Main report API params: {main_report_params}")
             
-            # Get report data
-            data = await self._make_request('/admin_api/v1/report/build', method='POST', json=report_params)
+            # Get main report data (accurate metrics)
+            data = await self._make_request('/admin_api/v1/report/build', method='POST', json=main_report_params)
             
             if not data or 'rows' not in data:
-                logger.warning("No creatives data received from API")
-                logger.warning(f"API response: {data}")
+                logger.warning("No creatives data received from main API")
+                logger.warning(f"Main API response: {data}")
                 return []
             
-            logger.info(f"API returned {len(data.get('rows', []))} raw rows")
+            logger.info(f"Main API returned {len(data.get('rows', []))} raw rows")
             
-            # Process and aggregate data by creative (with date tracking for active days)
+            # SECOND REQUEST: Get active days data (with datetime grouping)
+            active_days_params = {
+                'metrics': ['clicks'],  # Just need clicks to count active days
+                'columns': ['sub_id_4', 'datetime'],
+                'filters': main_report_params['filters'].copy(),  # Same filters
+                'grouping': ['sub_id_4', 'datetime'],
+                'limit': 10000
+            }
+            
+            logger.info(f"Getting active days data...")
+            logger.info(f"Active days API params: {active_days_params}")
+            
+            active_days_data = await self._make_request('/admin_api/v1/report/build', method='POST', json=active_days_params)
+            
+            # Process active days data to get unique dates per creative
+            creative_active_days = {}
+            if active_days_data and 'rows' in active_days_data:
+                logger.info(f"Active days API returned {len(active_days_data['rows'])} rows")
+                for row in active_days_data['rows']:
+                    creative_id = row.get('sub_id_4', 'unknown')
+                    if creative_id == 'unknown' or not creative_id:
+                        continue
+                    
+                    datetime_str = row.get('datetime', '')
+                    clicks = int(row.get('clicks', 0))
+                    
+                    if clicks > 0 and datetime_str:
+                        # Extract date part
+                        try:
+                            date_part = datetime_str.split('T')[0] if 'T' in datetime_str else datetime_str.split(' ')[0]
+                        except:
+                            date_part = datetime_str
+                        
+                        if creative_id not in creative_active_days:
+                            creative_active_days[creative_id] = set()
+                        creative_active_days[creative_id].add(date_part)
+            else:
+                logger.warning("No active days data received")
+            
+            logger.info(f"Processed active days for {len(creative_active_days)} creatives")
+            
+            # Process and aggregate main data by creative (accurate metrics)
             creatives_data = {}
             processed_rows = 0
             skipped_rows = 0
@@ -965,19 +1005,8 @@ class KeitaroClient:
                     buyer = 'unknown'
                 
                 country = row.get('country', 'unknown')
-                datetime_str = row.get('datetime', '')
                 clicks = int(row.get('clicks', 0))
                 unique_clicks = int(row.get('global_unique_clicks', 0))
-                
-                # Extract date for active days calculation
-                if datetime_str:
-                    try:
-                        # Extract date part (YYYY-MM-DD) from datetime string
-                        date_part = datetime_str.split('T')[0] if 'T' in datetime_str else datetime_str.split(' ')[0]
-                    except:
-                        date_part = datetime_str
-                else:
-                    date_part = 'unknown'
                 
                 # Initialize creative data if not exists
                 if creative_id not in creatives_data:
@@ -990,8 +1019,7 @@ class KeitaroClient:
                         'conversions': 0,
                         'leads': 0,
                         'deposits': 0,  # sales = deposits
-                        'revenue': 0.0,
-                        'active_dates': set()  # Track unique dates for active days
+                        'revenue': 0.0
                     }
                 
                 # Aggregate data
@@ -1002,10 +1030,6 @@ class KeitaroClient:
                 creatives_data[creative_id]['leads'] += int(row.get('leads', 0))
                 creatives_data[creative_id]['deposits'] += int(row.get('sales', 0))
                 creatives_data[creative_id]['revenue'] += float(row.get('revenue', 0))
-                
-                # Track active dates (only add if there were clicks)
-                if clicks > 0 and date_part != 'unknown':
-                    creatives_data[creative_id]['active_dates'].add(date_part)
             
             # Calculate metrics and format result
             result = []
@@ -1016,8 +1040,8 @@ class KeitaroClient:
                 # Calculate conversion rates
                 dep_to_reg = (data['deposits'] / data['leads'] * 100) if data['leads'] > 0 else 0
                 
-                # Calculate active days from unique dates
-                active_days = len(data['active_dates'])
+                # Get active days from second API call
+                active_days = len(creative_active_days.get(creative_id, set()))
                 if active_days == 0:
                     active_days = 1  # Default to 1 if no dates tracked
                 
@@ -1040,13 +1064,20 @@ class KeitaroClient:
             logger.info(f"Processed {processed_rows} rows, skipped {skipped_rows} rows")
             logger.info(f"Final result: {len(result)} unique creatives")
             
-            # Log TR36 details if found
+            # Log tr32 details if found (user's case)
+            tr32_result = next((r for r in result if r['creative_id'] == 'tr32'), None)
+            if tr32_result:
+                logger.info(f"tr32 in final result: leads={tr32_result['leads']}, active_days={tr32_result['active_days']}, revenue=${tr32_result['revenue']}")
+                logger.info(f"tr32 from active_days_data: {len(creative_active_days.get('tr32', set()))} unique dates")
+            else:
+                logger.info("tr32 NOT FOUND in final result")
+            
+            # Also log TR36 details if found
             tr36_result = next((r for r in result if r['creative_id'] == 'TR36'), None)
             if tr36_result:
                 logger.info(f"TR36 in final result: revenue=${tr36_result['revenue']}, unique_clicks={tr36_result['unique_clicks']}, uepc=${tr36_result['uepc']:.2f}")
             else:
                 logger.info("TR36 NOT FOUND in final result")
-                # Show first few creative IDs
                 sample_ids = [r['creative_id'] for r in result[:5]]
                 logger.info(f"Sample creative IDs in result: {sample_ids}")
             
