@@ -961,7 +961,7 @@ class KeitaroClient:
             # Add filter to exclude empty sub_id_4 values
             active_days_params['filters'].append({
                 'name': 'sub_id_4',
-                'operator': 'NOT_EQUALS',
+                'operator': 'NOT_EQUAL',  # Correct operator name
                 'expression': ''
             })
             
