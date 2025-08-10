@@ -1020,13 +1020,17 @@ class KeitaroClient:
                             creative_active_days[creative_id] = set()
                         creative_active_days[creative_id].add(date_part)
                         
-                        # Log tr32 specifically
+                        # Log tr32 specifically  
                         if creative_id == 'tr32':
                             logger.info(f"tr32 active day found: date={date_part}, clicks={clicks}")
                             
                         # Log first few valid creatives for debugging
-                        if len(creative_active_days) <= 3:
+                        if len(creative_active_days) <= 5:
                             logger.info(f"Active day found for {creative_id}: date={date_part}, clicks={clicks}")
+                            
+                        # ДОПОЛНИТЕЛЬНАЯ ДИАГНОСТИКА: логируем все обработанные ID
+                        if len(creative_active_days) <= 10:
+                            logger.info(f"Processed creative ID: '{creative_id}' (type: {type(creative_id)}) with {clicks} clicks on {date_part}")
                 
                 # ДЕТАЛЬНАЯ ДИАГНОСТИКА АКТИВНЫХ ДНЕЙ TR32
                 logger.info(f"=== TR32 ACTIVE DAYS DIAGNOSTICS ===")
@@ -1284,6 +1288,13 @@ class KeitaroClient:
                 
                 # Get active days from second API call
                 active_days = len(creative_active_days.get(creative_id, set()))
+                
+                # ДИАГНОСТИКА: проверим сопоставление ID для tr32
+                if creative_id == 'tr32':
+                    logger.info(f"tr32 ACTIVE DAYS LOOKUP: looking for '{creative_id}' in creative_active_days")
+                    logger.info(f"tr32 Available keys in creative_active_days: {list(creative_active_days.keys())[:10]}")
+                    logger.info(f"tr32 Found {active_days} active days")
+                
                 if active_days == 0:
                     active_days = 1  # Default to 1 if no dates tracked
                 
