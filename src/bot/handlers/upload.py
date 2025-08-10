@@ -431,18 +431,19 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         
         async with get_db_session() as session:
             # Ищем или создаем пользователя
-            user_stmt = select(User).where(User.telegram_user_id == user.id)
+            user_stmt = select(User).where(User.tg_user_id == user.id)
             db_user = await session.execute(user_stmt)
             db_user = db_user.scalar_one_or_none()
             
             if not db_user:
                 # Создаем нового пользователя
+                from core.enums import UserRole
                 db_user = User(
-                    telegram_user_id=user.id,
-                    username=user.username,
-                    first_name=user.first_name,
-                    last_name=user.last_name,
-                    role='owner'  # или из settings.allowed_users
+                    tg_user_id=user.id,
+                    tg_username=user.username,
+                    full_name=f"{user.first_name or ''} {user.last_name or ''}".strip(),
+                    role=UserRole.OWNER,  # Используем enum вместо строки
+                    buyer_id=buyer_id or None
                 )
                 session.add(db_user)
                 await session.flush()  # Получаем ID
