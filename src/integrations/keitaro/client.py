@@ -832,3 +832,194 @@ class KeitaroClient:
         except Exception as e:
             logger.error(f"Failed to get creatives stats: {e}")
             return []
+
+    async def get_creatives_report(
+        self,
+        period: ReportPeriod = ReportPeriod.YESTERDAY,
+        buyer_id: Optional[str] = None,
+        geo: Optional[str] = None,
+        traffic_source_ids: Optional[List[str]] = None,
+        custom_start: Optional[str] = None,
+        custom_end: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Get detailed creatives statistics with sub_id_4 as creative ID
+        
+        Returns list of creative stats including:
+        - creative_id (from sub_id_4)
+        - buyer_id (from sub_id_1)
+        - geo/country
+        - clicks, unique_clicks, conversions, deposits, revenue
+        - uEPC (revenue per unique click)
+        - active_days (days with 10+ clicks)
+        """
+        
+        # Determine time range
+        if period == ReportPeriod.CUSTOM and custom_start and custom_end:
+            start_date = custom_start
+            end_date = custom_end
+        else:
+            # Calculate dates based on period
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            
+            if period == ReportPeriod.TODAY:
+                start_date = now.strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.YESTERDAY:
+                yesterday = now - timedelta(days=1)
+                start_date = yesterday.strftime('%Y-%m-%d 00:00:00')
+                end_date = yesterday.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.LAST_3D:
+                start_date = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.LAST_7D:
+                start_date = (now - timedelta(days=7)).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.LAST_30D:
+                start_date = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            else:
+                start_date = (now - timedelta(days=1)).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+        
+        try:
+            # Build report params with sub_id_4 for creative ID
+            report_params = {
+                'columns': [
+                    'sub_id_4',      # Creative ID
+                    'sub_id_1',      # Buyer ID
+                    'country',       # GEO
+                    'datetime',      # For active days calculation
+                    'clicks', 
+                    'unique_clicks', 
+                    'conversions',
+                    'leads',
+                    'sales',
+                    'revenue'
+                ],
+                'filters': [
+                    {
+                        'name': 'datetime',
+                        'operator': 'BETWEEN',
+                        'expression': [start_date, end_date]
+                    }
+                ],
+                'grouping': ['sub_id_4', 'sub_id_1', 'country', 'datetime'],
+                'metrics': ['clicks', 'unique_clicks', 'conversions', 'leads', 'sales', 'revenue'],
+                'sort': [{'name': 'revenue', 'order': 'DESC'}],
+                'limit': 10000  # Get more data for active days calculation
+            }
+            
+            # Add buyer filter if specified
+            if buyer_id:
+                report_params['filters'].append({
+                    'name': 'sub_id_1',
+                    'operator': 'EQUALS',
+                    'expression': buyer_id
+                })
+            
+            # Add geo filter if specified
+            if geo:
+                report_params['filters'].append({
+                    'name': 'country',
+                    'operator': 'EQUALS',
+                    'expression': geo
+                })
+            
+            # Add traffic source filter if specified
+            if traffic_source_ids:
+                report_params['filters'].append({
+                    'name': 'ts_id',
+                    'operator': 'IN_LIST',
+                    'expression': traffic_source_ids
+                })
+            
+            logger.info(f"Getting creatives report: {start_date} - {end_date}")
+            
+            # Get report data
+            data = await self._make_request('/admin_api/v1/report/build', method='POST', json=report_params)
+            
+            if not data or 'rows' not in data:
+                logger.warning("No creatives data received")
+                return []
+            
+            # Process and aggregate data by creative
+            creatives_data = {}
+            daily_clicks = {}  # Track clicks per day for active days calculation
+            
+            for row in data['rows']:
+                creative_id = row.get('sub_id_4', 'unknown')
+                if creative_id == 'unknown' or not creative_id:
+                    continue
+                
+                buyer = row.get('sub_id_1', 'unknown')
+                country = row.get('country', 'unknown')
+                date = row.get('datetime', '').split(' ')[0]  # Get date part
+                clicks = int(row.get('clicks', 0))
+                
+                # Initialize creative data if not exists
+                if creative_id not in creatives_data:
+                    creatives_data[creative_id] = {
+                        'creative_id': creative_id,
+                        'buyer_id': buyer,
+                        'geos': set(),
+                        'clicks': 0,
+                        'unique_clicks': 0,
+                        'conversions': 0,
+                        'leads': 0,
+                        'deposits': 0,  # sales = deposits
+                        'revenue': 0.0,
+                        'active_days': 0
+                    }
+                    daily_clicks[creative_id] = {}
+                
+                # Aggregate data
+                creatives_data[creative_id]['geos'].add(country)
+                creatives_data[creative_id]['clicks'] += clicks
+                creatives_data[creative_id]['unique_clicks'] += int(row.get('unique_clicks', 0))
+                creatives_data[creative_id]['conversions'] += int(row.get('conversions', 0))
+                creatives_data[creative_id]['leads'] += int(row.get('leads', 0))
+                creatives_data[creative_id]['deposits'] += int(row.get('sales', 0))
+                creatives_data[creative_id]['revenue'] += float(row.get('revenue', 0))
+                
+                # Track daily clicks for active days calculation
+                if date not in daily_clicks[creative_id]:
+                    daily_clicks[creative_id][date] = 0
+                daily_clicks[creative_id][date] += clicks
+            
+            # Calculate metrics and format result
+            result = []
+            for creative_id, data in creatives_data.items():
+                # Calculate active days (days with 10+ clicks)
+                active_days = sum(1 for clicks in daily_clicks[creative_id].values() if clicks >= 10)
+                
+                # Calculate uEPC
+                uepc = data['revenue'] / data['unique_clicks'] if data['unique_clicks'] > 0 else 0
+                
+                # Calculate conversion rates
+                dep_to_reg = (data['deposits'] / data['leads'] * 100) if data['leads'] > 0 else 0
+                
+                result.append({
+                    'creative_id': creative_id,
+                    'buyer_id': data['buyer_id'],
+                    'geos': ', '.join(sorted(data['geos'])),
+                    'clicks': data['clicks'],
+                    'unique_clicks': data['unique_clicks'],
+                    'conversions': data['conversions'],
+                    'leads': data['leads'],
+                    'deposits': data['deposits'],
+                    'revenue': data['revenue'],
+                    'dep_to_reg': dep_to_reg,
+                    'uepc': uepc,
+                    'active_days': active_days
+                })
+            
+            # Sort by revenue by default
+            result.sort(key=lambda x: x['revenue'], reverse=True)
+            
+            logger.info(f"Found {len(result)} creatives")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to get creatives report: {e}")
+            return []

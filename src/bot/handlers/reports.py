@@ -441,8 +441,9 @@ async def handle_buyers_select(callback: CallbackQuery, state: FSMContext):
             keyboard_buttons.append(row)
         
         # Добавляем кнопку "Назад" с сохранением источника трафика
-        if data.get('traffic_source'):
-            back_callback = f"period_buyers_{data['traffic_source']}_{period}"
+        user_data = await state.get_data()
+        if user_data.get('traffic_source'):
+            back_callback = f"period_buyers_{user_data['traffic_source']}_{period}"
         else:
             back_callback = f"period_buyers_{period}"
         
@@ -787,6 +788,466 @@ async def cmd_export(message: Message):
         "• Сводных отчетов",
         parse_mode="HTML"
     )
+
+
+# ===== ОТЧЕТЫ ПО КРЕАТИВАМ (продолжение) =====
+
+@router.callback_query(F.data.startswith("period_creatives_"))
+async def handle_creatives_period_selection(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора периода для отчета по креативам"""
+    parts = callback.data.split("_")
+    
+    # Извлекаем период и источник трафика
+    if len(parts) >= 3:
+        period = parts[2]
+        # Источник трафика может быть после периода
+        traffic_source = parts[3] if len(parts) > 3 else None
+    else:
+        await callback.answer("❌ Некорректные данные")
+        return
+    
+    await state.set_state(ReportsStates.filters_selection)
+    await state.update_data(
+        report_type="creatives", 
+        period=period, 
+        traffic_source=traffic_source
+    )
+    
+    # Создаем клавиатуру для выбора байера
+    keyboard_buttons = []
+    
+    # Кнопка "По всем байерам"
+    keyboard_buttons.append([
+        InlineKeyboardButton(
+            text="📊 По всем байерам",
+            callback_data=f"creo_buyer_all_{period}"
+        )
+    ])
+    
+    # Кнопка "Выбрать байера"
+    keyboard_buttons.append([
+        InlineKeyboardButton(
+            text="👤 Выбрать байера",
+            callback_data=f"creo_buyer_select_{period}"
+        )
+    ])
+    
+    # Кнопка назад
+    if traffic_source:
+        back_callback = f"trafficsrc_creatives_{traffic_source}"
+    else:
+        back_callback = "trafficsrc_creatives"
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="↩️ Назад", callback_data=back_callback)
+    ])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    text = f"""
+🎨 <b>Отчет по креативам</b>
+📅 Период: {format_period_name(period)}
+
+Выберите фильтр по байерам:
+"""
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("creo_buyer_"))
+async def handle_creatives_buyer_selection(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора байера для отчета по креативам"""
+    parts = callback.data.split("_")
+    
+    if len(parts) < 4:
+        await callback.answer("❌ Некорректные данные")
+        return
+    
+    action = parts[2]  # all или select
+    period = parts[3]
+    
+    if action == "select":
+        # Показываем список байеров для выбора
+        await callback.message.edit_text("⏳ Загружаем список байеров...")
+        
+        try:
+            reports_service = ReportsService()
+            user_data = await state.get_data()
+            traffic_source = user_data.get("traffic_source")
+            
+            # Получаем список байеров
+            buyers_data = await reports_service.get_buyers_report(period, "all", None, traffic_source)
+            
+            if not buyers_data:
+                await callback.message.edit_text(
+                    f"❌ Нет данных по байерам за период: {format_period_name(period)}",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="↩️ Назад", callback_data=f"period_creatives_{period}")
+                    ]])
+                )
+                return
+            
+            # Создаем клавиатуру с байерами
+            keyboard_buttons = []
+            
+            for i in range(0, len(buyers_data), 2):
+                row = []
+                for buyer in buyers_data[i:i+2]:
+                    buyer_id = buyer.get('buyer_id', 'unknown')
+                    row.append(InlineKeyboardButton(
+                        text=f"👤 {buyer_id}",
+                        callback_data=f"creo_setbuyer_{buyer_id}_{period}"
+                    ))
+                keyboard_buttons.append(row)
+            
+            keyboard_buttons.append([
+                InlineKeyboardButton(text="↩️ Назад", callback_data=f"period_creatives_{period}")
+            ])
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+            
+            await callback.message.edit_text(
+                f"👥 <b>Выберите байера</b>\n📅 Период: {format_period_name(period)}",
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error loading buyers for creatives: {e}")
+            await callback.message.edit_text("❌ Ошибка при загрузке списка байеров")
+    
+    else:
+        # all - переходим к выбору гео
+        await state.update_data(buyer_id="all")
+        await show_creatives_geo_selection(callback, state, period)
+
+
+@router.callback_query(F.data.startswith("creo_setbuyer_"))
+async def handle_creatives_set_buyer(callback: CallbackQuery, state: FSMContext):
+    """Установка выбранного байера и переход к выбору гео"""
+    parts = callback.data.split("_")
+    
+    if len(parts) < 4:
+        await callback.answer("❌ Некорректные данные")
+        return
+    
+    buyer_id = parts[2]
+    period = parts[3]
+    
+    await state.update_data(buyer_id=buyer_id)
+    await show_creatives_geo_selection(callback, state, period)
+
+
+async def show_creatives_geo_selection(callback: CallbackQuery, state: FSMContext, period: str):
+    """Показать выбор гео для отчета по креативам"""
+    user_data = await state.get_data()
+    buyer_id = user_data.get("buyer_id", "all")
+    
+    # Создаем клавиатуру для выбора гео
+    keyboard_buttons = []
+    
+    # Кнопка "Все гео"
+    keyboard_buttons.append([
+        InlineKeyboardButton(
+            text="🌍 Все гео",
+            callback_data=f"creo_geo_all_{period}"
+        )
+    ])
+    
+    # Кнопка "Выбрать гео"
+    keyboard_buttons.append([
+        InlineKeyboardButton(
+            text="📍 Выбрать гео",
+            callback_data=f"creo_geo_select_{period}"
+        )
+    ])
+    
+    # Кнопка назад
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="↩️ Назад", callback_data=f"period_creatives_{period}")
+    ])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    text = f"""
+🎨 <b>Отчет по креативам</b>
+📅 Период: {format_period_name(period)}
+👤 Байер: {buyer_id}
+
+Выберите фильтр по гео:
+"""
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("creo_geo_"))
+async def handle_creatives_geo_selection(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора гео для отчета по креативам"""
+    parts = callback.data.split("_")
+    
+    if len(parts) < 4:
+        await callback.answer("❌ Некорректные данные")
+        return
+    
+    action = parts[2]  # all или select
+    period = parts[3]
+    
+    if action == "select":
+        # Показываем список гео для выбора
+        # Список популярных гео
+        geos = ["AT", "AZ", "BE", "BG", "CH", "CZ", "DE", "ES", "FR", "HR", 
+                "HU", "IT", "NL", "PL", "RO", "SI", "SK", "TR", "UK", "US"]
+        
+        keyboard_buttons = []
+        
+        # Группируем гео по 4 в ряд
+        for i in range(0, len(geos), 4):
+            row = []
+            for geo in geos[i:i+4]:
+                row.append(InlineKeyboardButton(
+                    text=f"🌍 {geo}",
+                    callback_data=f"creo_setgeo_{geo}_{period}"
+                ))
+            keyboard_buttons.append(row)
+        
+        # Кнопка назад
+        user_data = await state.get_data()
+        buyer_id = user_data.get("buyer_id", "all")
+        if buyer_id == "all":
+            back_callback = f"creo_buyer_all_{period}"
+        else:
+            back_callback = f"creo_setbuyer_{buyer_id}_{period}"
+        
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="↩️ Назад", callback_data=back_callback)
+        ])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        
+        await callback.message.edit_text(
+            f"🌍 <b>Выберите гео</b>\n📅 Период: {format_period_name(period)}",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+    
+    else:
+        # all - переходим к выбору метрики сортировки
+        await state.update_data(geo="all")
+        await show_creatives_metric_selection(callback, state, period)
+
+
+@router.callback_query(F.data.startswith("creo_setgeo_"))
+async def handle_creatives_set_geo(callback: CallbackQuery, state: FSMContext):
+    """Установка выбранного гео и переход к выбору метрики"""
+    parts = callback.data.split("_")
+    
+    if len(parts) < 4:
+        await callback.answer("❌ Некорректные данные")
+        return
+    
+    geo = parts[2]
+    period = parts[3]
+    
+    await state.update_data(geo=geo)
+    await show_creatives_metric_selection(callback, state, period)
+
+
+async def show_creatives_metric_selection(callback: CallbackQuery, state: FSMContext, period: str):
+    """Показать выбор метрики для сортировки креативов"""
+    user_data = await state.get_data()
+    buyer_id = user_data.get("buyer_id", "all")
+    geo = user_data.get("geo", "all")
+    
+    # Создаем клавиатуру для выбора метрики
+    keyboard_buttons = []
+    
+    # Кнопки выбора метрики
+    keyboard_buttons.append([
+        InlineKeyboardButton(
+            text="💰 Лучшие по uEPC",
+            callback_data=f"creo_show_uepc_{period}"
+        )
+    ])
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(
+            text="💵 Лучшие по доходу",
+            callback_data=f"creo_show_revenue_{period}"
+        )
+    ])
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(
+            text="📅 Лучшие по сроку жизни",
+            callback_data=f"creo_show_active_{period}"
+        )
+    ])
+    
+    # Кнопка назад
+    if geo == "all":
+        back_callback = f"creo_geo_all_{period}"
+    else:
+        back_callback = f"creo_setgeo_{geo}_{period}"
+    
+    keyboard_buttons.append([
+        InlineKeyboardButton(text="↩️ Назад", callback_data=back_callback)
+    ])
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    text = f"""
+🎨 <b>Отчет по креативам</b>
+📅 Период: {format_period_name(period)}
+👤 Байер: {buyer_id}
+🌍 Гео: {geo}
+
+Выберите метрику для сортировки:
+"""
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("creo_show_"))
+async def handle_creatives_show_report(callback: CallbackQuery, state: FSMContext):
+    """Показать отчет по креативам"""
+    parts = callback.data.split("_")
+    
+    if len(parts) < 4:
+        await callback.answer("❌ Некорректные данные")
+        return
+    
+    metric = parts[2]  # uepc, revenue, active
+    period = parts[3]
+    
+    # Сохраняем метрику для возможности пересортировки
+    await state.update_data(current_metric=metric)
+    
+    # Показываем отчет
+    await show_creatives_report(callback, state, period, metric)
+
+
+async def show_creatives_report(callback: CallbackQuery, state: FSMContext, period: str, sort_by: str):
+    """Отобразить отчет по креативам"""
+    await callback.message.edit_text("⏳ Генерируем отчет по креативам...")
+    await callback.answer()
+    
+    try:
+        user_data = await state.get_data()
+        buyer_id = user_data.get("buyer_id", "all")
+        geo = user_data.get("geo", "all")
+        traffic_source = user_data.get("traffic_source")
+        
+        # Получаем данные
+        reports_service = ReportsService()
+        creatives_data = await reports_service.get_creatives_report(
+            period=period,
+            buyer_id=buyer_id if buyer_id != "all" else None,
+            geo=geo if geo != "all" else None,
+            traffic_source=traffic_source,
+            sort_by=sort_by
+        )
+        
+        if not creatives_data:
+            await callback.message.edit_text(
+                f"❌ Нет данных по креативам за выбранный период",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="↩️ Назад", callback_data=f"creo_geo_all_{period}")
+                ]])
+            )
+            return
+        
+        # Форматируем отчет
+        metric_names = {
+            "uepc": "uEPC",
+            "revenue": "доходу",
+            "active": "сроку жизни"
+        }
+        
+        text = f"""
+🎨 <b>Топ-5 креативов по {metric_names.get(sort_by, sort_by)}</b>
+📅 Период: {format_period_name(period)}
+👤 Байер: {buyer_id}
+🌍 Гео: {geo}
+
+"""
+        
+        for i, creative in enumerate(creatives_data, 1):
+            text += f"""
+{i}. <b>ID: {creative['creative_id']}</b>
+👤 Байер: {creative['buyer_id']}
+🌍 Гео: {creative['geos']}
+🖱 Уник. клики: {creative['unique_clicks']:,}
+📝 Регистрации: {creative['leads']:,}
+💳 Депозиты: {creative['deposits']:,}
+💰 Доход: ${creative['revenue']:,.2f}
+📊 Деп/Рег: {creative['dep_to_reg']:.1f}%
+💵 uEPC: ${creative['uepc']:.2f}
+📅 Активных дней: {creative['active_days']}
+
+"""
+        
+        # Кнопки для пересортировки
+        keyboard_buttons = []
+        
+        # Показываем другие варианты сортировки
+        if sort_by != "uepc":
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text="💰 Пересортировать по uEPC",
+                    callback_data=f"creo_resort_uepc_{period}"
+                )
+            ])
+        
+        if sort_by != "revenue":
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text="💵 Пересортировать по доходу",
+                    callback_data=f"creo_resort_revenue_{period}"
+                )
+            ])
+        
+        if sort_by != "active":
+            keyboard_buttons.append([
+                InlineKeyboardButton(
+                    text="📅 Пересортировать по сроку жизни",
+                    callback_data=f"creo_resort_active_{period}"
+                )
+            ])
+        
+        # Кнопка назад
+        keyboard_buttons.append([
+            InlineKeyboardButton(text="↩️ Изменить фильтры", callback_data=f"period_creatives_{period}")
+        ])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        
+    except Exception as e:
+        logger.error(f"Error generating creatives report: {e}")
+        await callback.message.edit_text(
+            "❌ Ошибка при генерации отчета",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="↩️ Назад", callback_data=f"period_creatives_{period}")
+            ]])
+        )
+
+
+@router.callback_query(F.data.startswith("creo_resort_"))
+async def handle_creatives_resort(callback: CallbackQuery, state: FSMContext):
+    """Пересортировка отчета по креативам"""
+    parts = callback.data.split("_")
+    
+    if len(parts) < 4:
+        await callback.answer("❌ Некорректные данные")
+        return
+    
+    metric = parts[2]  # uepc, revenue, active
+    period = parts[3]
+    
+    # Показываем отчет с новой сортировкой
+    await show_creatives_report(callback, state, period, metric)
 
 
 # ===== ОТЧЕТЫ ПО ГЕО =====

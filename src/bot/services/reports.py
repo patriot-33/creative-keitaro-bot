@@ -645,3 +645,71 @@ class ReportsService:
             source_groups[source_name]['conversions'] += traffic.get('conversions', 0)
         
         return list(source_groups.values())
+    
+    async def get_creatives_report(
+        self,
+        period: str,
+        buyer_id: Optional[str] = None,
+        geo: Optional[str] = None,
+        traffic_source: Optional[str] = None,
+        sort_by: str = "uepc"  # uepc, revenue, active_days
+    ) -> List[Dict[str, Any]]:
+        """Получить отчет по креативам
+        
+        Args:
+            period: Период отчета
+            buyer_id: ID байера (None = все байеры)
+            geo: Гео (None = все гео)
+            traffic_source: Источник трафика
+            sort_by: Сортировка (uepc, revenue, active_days)
+            
+        Returns:
+            Топ-5 креативов отсортированных по выбранному критерию
+        """
+        
+        # Конвертируем период
+        period_enum = self._period_to_enum(period)
+        custom_dates = self._get_custom_dates(period)
+        
+        # Определяем источники трафика
+        traffic_source_ids = None
+        if traffic_source:
+            traffic_source_ids = await self._get_traffic_source_filter(traffic_source)
+        
+        try:
+            async with KeitaroClient() as client:
+                # Получаем данные по креативам
+                if custom_dates:
+                    creatives_data = await client.get_creatives_report(
+                        period=ReportPeriod.CUSTOM,
+                        buyer_id=buyer_id if buyer_id != "all" else None,
+                        geo=geo if geo != "all" else None,
+                        traffic_source_ids=traffic_source_ids,
+                        custom_start=custom_dates[0],
+                        custom_end=custom_dates[1]
+                    )
+                else:
+                    creatives_data = await client.get_creatives_report(
+                        period=period_enum,
+                        buyer_id=buyer_id if buyer_id != "all" else None,
+                        geo=geo if geo != "all" else None,
+                        traffic_source_ids=traffic_source_ids
+                    )
+                
+                if not creatives_data:
+                    return []
+                
+                # Сортируем по выбранному критерию
+                if sort_by == "uepc":
+                    creatives_data.sort(key=lambda x: x['uepc'], reverse=True)
+                elif sort_by == "revenue":
+                    creatives_data.sort(key=lambda x: x['revenue'], reverse=True)
+                elif sort_by == "active_days":
+                    creatives_data.sort(key=lambda x: x['active_days'], reverse=True)
+                
+                # Возвращаем топ-5
+                return creatives_data[:5]
+                
+        except Exception as e:
+            logger.error(f"Failed to get creatives report: {e}")
+            return []
