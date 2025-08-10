@@ -1,0 +1,263 @@
+# =============================================================================
+# CONFIDENTIAL DATA - NEVER COMMIT THESE FILES TO GIT
+# =============================================================================
+
+# Environment files containing secrets
+.env
+.env.local
+.env.production
+.env.development
+
+# API Keys and service accounts
+google-service-account.json
+*.json
+!alembic.ini
+!src/**/*.json
+
+# User data
+users.json
+pending_users.json
+
+# Logs and runtime data
+*.log
+logs/
+bot_*.log
+bot.pid
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# =============================================================================
+# PYTHON
+# =============================================================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# =============================================================================
+# DEVELOPMENT & DEBUGGING
+# =============================================================================
+
+# Debug files and scripts
+debug_*.py
+test_*.py
+analyze_*.py
+check_*.py
+investigate_*.py
+verify_*.py
+quick_*.py
+simple_*.py
+working_*.py
+minimal_*.py
+enterprise_*.py
+restart_*.py
+run_*.py
+start_*.py
+stop_*.py
+clear_*.py
+direct_*.py
+correct_*.py
+final_*.py
+find_*.py
+leads_*.py
+missing_*.py
+cross_*.py
+data_*.py
+deep_*.py
+synchronized_*.py
+timezone_*.py
+
+# CSV files (may contain sensitive data)
+*.csv
+
+# Shell scripts
+*.sh
+!start.sh
+
+# Temporary files
+temp/
+tmp/
+.temp/
+.tmp/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# =============================================================================
+# DOCKER & DEPLOYMENT
+# =============================================================================
+
+# Docker
+.dockerignore
+
+# =============================================================================
+# PROJECT SPECIFIC
+# =============================================================================
+
+# Documentation files (generated during development)
+*.md
+!README.md
+!DEPLOYMENT.md
+
+# Configuration backups
+*.ini.bak
+*.conf.bak
+
+# Migration logs
+alembic_logs/
+
+# Uploaded files
+uploads/
+downloads/
+
+# Generated PNG files
+*.png
+
+# Makefile
+Makefile
+
+# Poetry lock file (will be regenerated)
+poetry.lock
+
+# Project config
+pyproject.toml
+
+# Docker compose (may contain sensitive data)
+docker-compose.yml
+docker-compose.*.yml

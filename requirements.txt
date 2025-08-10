@@ -1,0 +1,46 @@
+# Core bot framework
+aiogram==3.4.1
+aiohttp==3.9.3
+
+# Web framework (for health checks)
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# HTTP client
+httpx==0.26.0
+
+# Database
+asyncpg==0.29.0
+sqlalchemy[asyncio]==2.0.25
+alembic==1.13.1
+psycopg2-binary==2.9.9
+
+# Configuration
+pydantic==2.5.3
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+
+# Google APIs
+google-api-python-client==2.114.0
+google-auth==2.26.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.0
+gspread==5.12.0
+
+# Data processing
+pandas==2.1.4
+openpyxl==3.1.2
+aiofiles==23.2.1
+
+# Date/time
+python-dateutil==2.8.2
+pytz==2024.1
+pendulum==3.0.0
+
+# Utilities
+redis==5.0.1
+tenacity==8.2.3
+structlog==24.1.0
+
+# Production
+gunicorn==21.2.0
