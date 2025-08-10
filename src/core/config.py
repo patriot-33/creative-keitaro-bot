@@ -16,15 +16,15 @@ class Settings(BaseSettings):
     # Telegram
     telegram_bot_token: str
     
-    # Google
-    google_project_id: str
-    google_service_account_json: str
-    google_drive_root_folder_id: str
-    google_sheets_manifest_id: str
+    # Google (optional - deprecated in favor of Telegram storage)
+    google_project_id: Optional[str] = None
+    google_service_account_json: Optional[str] = None
+    google_drive_root_folder_id: Optional[str] = None
+    google_sheets_manifest_id: Optional[str] = None
     
-    # Google OAuth
-    google_oauth_client_id: str
-    google_oauth_client_secret: str
+    # Google OAuth (optional - deprecated in favor of Telegram storage)
+    google_oauth_client_id: Optional[str] = None
+    google_oauth_client_secret: Optional[str] = None
     google_oauth_redirect_uri: str = "https://creative-keitaro-bot.onrender.com/auth/google/callback"
     
     # Keitaro
@@ -114,8 +114,10 @@ class Settings(BaseSettings):
         return users
     
     @property
-    def google_credentials_dict(self) -> Dict:
-        """Load Google service account credentials"""
+    def google_credentials_dict(self) -> Optional[Dict]:
+        """Load Google service account credentials (deprecated - use Telegram storage)"""
+        if not self.google_service_account_json:
+            return None
         if self.google_service_account_json.startswith("{"):
             # JSON string
             return json.loads(self.google_service_account_json)

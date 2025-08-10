@@ -961,6 +961,115 @@ except Exception as e:
 
 ---
 
+## Баг #14: Переход с Google Drive на Telegram Storage - архитектурное решение
+
+### Описание решения:
+После столкновения с проблемами Google Drive API (Service Account quota, OAuth сложность), пользователь принял ключевое решение: **"а что если сохранять крео в телеграм?"**
+
+### Мотивация изменения:
+1. **Сложность Google Drive**: OAuth flow, refresh tokens, API quota
+2. **Telegram преимущества**: Файлы уже в Telegram после загрузки
+3. **Простота архитектуры**: Используем существующий file_id
+4. **Надежность**: Telegram гарантированно хранит файлы
+
+### Полная реализация Telegram Storage:
+
+#### 1. Обновление модели Creative:
+```python
+# src/db/models/creative.py
+class Creative(Base):
+    # Новые Telegram поля
+    telegram_file_id: Mapped[str] = mapped_column(String, nullable=False)
+    telegram_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    
+    # Google Drive поля сделаны опциональными (обратная совместимость)
+    drive_file_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    drive_link: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+```
+
+#### 2. Telegram Storage Service:
+```python
+# src/integrations/telegram/storage.py
+class TelegramStorageService:
+    async def store_creative(self, file_id: str, file_name: str, ...) -> Tuple[str, Optional[int], str]:
+        # Вычисляем SHA256 хэш из файла
+        file_info = await self.bot.get_file(file_id)
+        file_bytes = await self.bot.download_file(file_info.file_path)
+        sha256_hash = hashlib.sha256(file_bytes.read()).hexdigest()
+        
+        # Возвращаем telegram_file_id, message_id, sha256_hash
+        return file_id, None, sha256_hash
+```
+
+#### 3. Упрощение upload.py:
+```python
+# src/bot/handlers/upload.py - убрана вся Google Drive логика
+from integrations.telegram.storage import TelegramStorageService
+
+telegram_storage = TelegramStorageService(callback.bot)
+stored_file_id, message_id, sha256_hash = await telegram_storage.store_creative(...)
+
+# Сохранение в БД с Telegram полями
+creative = Creative(
+    creative_id=creative_id,
+    geo=geo,
+    telegram_file_id=storage_result['telegram_file_id'],
+    telegram_message_id=storage_result['telegram_message_id'],
+    uploader_user_id=db_user.id,
+    # остальные поля...
+)
+```
+
+#### 4. Обновление CreativesService:
+```python
+# src/bot/services/creatives.py
+def format_creative_info(creative: Creative) -> str:
+    return f"""🎨 <b>{creative.creative_id}</b>
+🌍 GEO: {creative.geo}
+📝 Имя: {creative.original_name or 'Не указано'}
+📊 Размер: {size_mb} MB
+📅 Загружен: {upload_date}
+📱 File ID: <code>{creative.telegram_file_id[:20]}...</code>
+💬 Описание: {creative.notes or 'нет'}"""
+```
+
+#### 5. База данных миграция:
+```python
+# src/db/migrations/versions/001_add_telegram_fields_to_creatives.py
+def upgrade() -> None:
+    op.create_table('creatives',
+        sa.Column('telegram_file_id', sa.String(), nullable=False),
+        sa.Column('telegram_message_id', sa.BigInteger(), nullable=True),
+        sa.Column('drive_file_id', sa.String(), nullable=True),  # Опционально
+        sa.Column('drive_link', sa.String(), nullable=True),     # Опционально
+        # остальные поля...
+    )
+```
+
+### Архитектурные преимущества:
+- ✅ **Простота**: Никаких внешних API токенов
+- ✅ **Надежность**: Telegram файлы живут бессрочно
+- ✅ **Скорость**: Нет загрузки в внешние сервисы
+- ✅ **Безопасность**: Файлы остаются в приватном боте
+- ✅ **Масштабируемость**: Telegram не имеет квот на хранение
+
+### Результат реализации:
+- ✅ **Telegram Storage Service** - полностью реализован
+- ✅ **Database Model** - обновлена с новыми полями
+- ✅ **Upload Handler** - переработан для Telegram storage
+- ✅ **Creatives Service** - обновлен для отображения Telegram данных
+- ✅ **Database Migration** - создана для новых полей
+- ✅ **Архитектура упрощена** - убраны все Google Drive зависимости
+
+### Файлы созданы/изменены:
+- `src/db/models/creative.py` - добавлены telegram_file_id, telegram_message_id
+- `src/integrations/telegram/storage.py` - новый TelegramStorageService
+- `src/bot/handlers/upload.py` - убрана Google Drive логика, добавлен Telegram storage
+- `src/bot/services/creatives.py` - обновлен format_creative_info для Telegram
+- `src/db/migrations/versions/001_add_telegram_fields_to_creatives.py` - миграция БД
+
+---
+
 ## 🎯 ИТОГОВОЕ СОСТОЯНИЕ СИСТЕМЫ
 
 ### ✅ Полностью исправлено и работает:

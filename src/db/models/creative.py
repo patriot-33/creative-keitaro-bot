@@ -13,8 +13,11 @@ class Creative(Base):
 
     creative_id: Mapped[str] = mapped_column(String, primary_key=True)
     geo: Mapped[str] = mapped_column(String, nullable=False)
-    drive_file_id: Mapped[str] = mapped_column(String, nullable=False)
-    drive_link: Mapped[str] = mapped_column(String, nullable=False)
+    telegram_file_id: Mapped[str] = mapped_column(String, nullable=False)
+    telegram_message_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    # Deprecated Google Drive fields (kept for compatibility)
+    drive_file_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    drive_link: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     uploader_user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id"), nullable=False
     )

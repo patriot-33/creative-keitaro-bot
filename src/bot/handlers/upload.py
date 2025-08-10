@@ -419,85 +419,54 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         file_io = await bot_instance.download_file(file_info.file_path)  # Получаем io.BytesIO
         file_bytes = file_io.read()  # Читаем реальные байты из потока
         
-        # Пробуем загрузить в Google Drive, fallback к временным ссылкам
-        logger.info(f"Starting Google Drive upload process...")
-        logger.info(f"File details: name={file_name}, size={len(file_bytes)} bytes, mime={mime_type}, geo={geo}")
+        # Сохраняем файл в Telegram (намного проще чем Google Drive!)
+        logger.info(f"Starting Telegram file storage...")
+        logger.info(f"File details: name={file_name}, size={file_size} bytes, mime={mime_type}, geo={geo}")
         
         try:
-            # Check if user has OAuth tokens
-            from db.models.user import User
-            from db.database import get_db_session
-            from sqlalchemy import select
-            from integrations.google.oauth_drive import OAuthGoogleDriveService
-            from datetime import datetime
+            from integrations.telegram.storage import TelegramStorageService
             
-            logger.info("Checking user's Google OAuth status...")
+            logger.info("Initializing TelegramStorageService...")
+            telegram_storage = TelegramStorageService(callback.bot)
             
-            async with get_db_session() as session:
-                user_stmt = select(User).where(User.tg_user_id == user.id)
-                user_result = await session.execute(user_stmt)
-                db_user = user_result.scalar_one_or_none()
-                
-                if not db_user or not db_user.google_access_token or not db_user.google_refresh_token:
-                    raise Exception("User not authorized with Google Drive. Use /google_auth first.")
-                
-                # Check if token is expired
-                if db_user.google_token_expires_at and db_user.google_token_expires_at <= datetime.utcnow():
-                    logger.warning("Google token expired, user needs to re-authorize")
-                    raise Exception("Google Drive authorization expired. Use /google_auth to re-authorize.")
-            
-            logger.info("User has valid Google OAuth tokens")
-            logger.info("Initializing OAuthGoogleDriveService...")
-            
-            google_drive = OAuthGoogleDriveService(
-                user_access_token=db_user.google_access_token,
-                user_refresh_token=db_user.google_refresh_token
+            logger.info("Storing creative in Telegram...")
+            stored_file_id, message_id, sha256_hash = await telegram_storage.store_creative(
+                file_id=telegram_file_id,
+                file_name=file_name,
+                file_size=file_size,
+                mime_type=mime_type,
+                creative_id=creative_id,
+                geo=geo
             )
-            logger.info(f"OAuthGoogleDriveService initialized with root folder: {google_drive.root_folder_id}")
             
-            logger.info("Calling google_drive.upload_file()...")
-            file_id, web_view_link, sha256_hash_gdrive = await google_drive.upload_file(
-                file_content=file_bytes,
-                filename=file_name,
-                geo=geo,
-                mime_type=mime_type
-            )
-            logger.info("google_drive.upload_file() completed successfully")
+            # Create display link
+            telegram_link = telegram_storage.create_telegram_link(stored_file_id, file_name)
             
-            drive_result = {
-                'file_id': file_id,
-                'web_view_link': web_view_link
+            storage_result = {
+                'telegram_file_id': stored_file_id,
+                'telegram_message_id': message_id,
+                'telegram_link': telegram_link,
+                'sha256_hash': sha256_hash
             }
-            logger.info(f"OAuth Google Drive upload SUCCESS!")
-            logger.info(f"  - File ID: {file_id}")
-            logger.info(f"  - Web View Link: {web_view_link}")
-            logger.info(f"  - SHA256: {sha256_hash_gdrive[:16]}...")
+            
+            logger.info(f"Telegram storage SUCCESS!")
+            logger.info(f"  - Telegram File ID: {stored_file_id}")
+            logger.info(f"  - Message ID: {message_id}")
+            logger.info(f"  - Display Link: {telegram_link}")
+            logger.info(f"  - SHA256: {sha256_hash[:16]}...")
             logger.info(f"  - User: {user.first_name} ({user.id})")
             
-            # Update user's token if it was refreshed
-            if google_drive.credentials.token != db_user.google_access_token:
-                logger.info("Updating refreshed Google tokens")
-                async with get_db_session() as session:
-                    user_stmt = select(User).where(User.tg_user_id == user.id)
-                    user_result = await session.execute(user_stmt)
-                    db_user = user_result.scalar_one_or_none()
-                    if db_user:
-                        db_user.google_access_token = google_drive.credentials.token
-                        if google_drive.credentials.expiry:
-                            db_user.google_token_expires_at = google_drive.credentials.expiry
-                        await session.commit()
-            
-        except Exception as gdrive_error:
-            logger.warning(f"Google Drive upload failed: {gdrive_error}")
-            logger.info("Falling back to temporary links for debugging")
-            
-            # Fallback: создаем временные ссылки и локальный hash
+        except Exception as telegram_error:
+            logger.error(f"Telegram storage failed: {telegram_error}")
+            # This shouldn't happen with Telegram, but just in case
             import hashlib
-            sha256_hash_gdrive = hashlib.sha256(file_bytes).hexdigest()
+            sha256_hash = hashlib.sha256(file_bytes).hexdigest()
             
-            drive_result = {
-                'file_id': f"temp_drive_id_{creative_id}",
-                'web_view_link': f"https://drive.google.com/file/d/temp_{creative_id}/view"
+            storage_result = {
+                'telegram_file_id': telegram_file_id,  # Use original file_id as fallback
+                'telegram_message_id': None,
+                'telegram_link': f"telegram://file/{telegram_file_id}",
+                'sha256_hash': sha256_hash
             }
         
         # Создаем/находим пользователя в базе данных
@@ -506,8 +475,8 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         from db.database import get_db_session
         from sqlalchemy import select
         
-        # Используем hash файла от Google Drive (уже рассчитан)
-        sha256_hash = sha256_hash_gdrive
+        # Используем hash файла от Telegram Storage (уже рассчитан)
+        sha256_hash = storage_result['sha256_hash']
         
         async with get_db_session() as session:
             # Ищем или создаем пользователя
@@ -532,8 +501,8 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
             creative = Creative(
                 creative_id=creative_id,
                 geo=geo,
-                drive_file_id=drive_result['file_id'],
-                drive_link=drive_result['web_view_link'],
+                telegram_file_id=storage_result['telegram_file_id'],
+                telegram_message_id=storage_result['telegram_message_id'],
                 uploader_user_id=db_user.id,
                 uploader_buyer_id=buyer_id or None,
                 original_name=file_name,
@@ -548,7 +517,7 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
             session.add(creative)
             await session.commit()
         
-        logger.info(f"Creative {creative_id} saved successfully for user {user.id} (without Google Drive)")
+        logger.info(f"Creative {creative_id} saved successfully for user {user.id} (using Telegram storage)")
         
         success_text = f"""
 🎉 <b>Креатив успешно сохранен!</b>

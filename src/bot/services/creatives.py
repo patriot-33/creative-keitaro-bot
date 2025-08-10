@@ -98,10 +98,17 @@ class CreativesService:
         size_mb = round(creative.size_bytes / (1024 * 1024), 1) if creative.size_bytes else 0
         upload_date = creative.upload_dt.strftime("%d.%m.%Y %H:%M") if creative.upload_dt else "Неизвестно"
         
-        return f"""🎨 <b>{creative.creative_id}</b>
+        # Используем Telegram file_id для отображения
+        telegram_display = f"telegram://file/{creative.telegram_file_id[:16]}..."
+        
+        info = f"""🎨 <b>{creative.creative_id}</b>
 🌍 GEO: {creative.geo}
 📝 Имя: {creative.original_name or 'Не указано'}
 📊 Размер: {size_mb} MB
 📅 Загружен: {upload_date}
-🔗 <a href="{creative.drive_link}">Открыть в Google Drive</a>
-"""
+📱 File ID: <code>{creative.telegram_file_id[:20]}...</code>"""
+        
+        if creative.notes:
+            info += f"\n💬 Описание: {creative.notes}"
+            
+        return info
