@@ -1035,11 +1035,18 @@ class KeitaroClient:
                 # ДЕТАЛЬНАЯ ДИАГНОСТИКА АКТИВНЫХ ДНЕЙ TR32
                 logger.info(f"=== TR32 ACTIVE DAYS DIAGNOSTICS ===")
                 
+                # ПОИСК TR32 по всем возможным sub_id_4 значениям
+                logger.info(f"Searching for TR32 in active days data...")
+                tr32_possible_ids = set()  # Соберем все возможные ID для tr32
+                
                 # Проверим сколько дней tr32 имел клики БЕЗ порога
                 tr32_all_days_clicks = {}
                 for row in active_days_data.get('rows', []):
                     creative_id = row.get('sub_id_4', 'unknown')
+                    
+                    # Ищем TR32 по разным критериям
                     if str(creative_id).lower() == 'tr32':
+                        tr32_possible_ids.add(creative_id)
                         datetime_str = row.get('datetime', '')
                         clicks = int(row.get('clicks', 0))
                         if datetime_str:
@@ -1047,6 +1054,24 @@ class KeitaroClient:
                             if date_part not in tr32_all_days_clicks:
                                 tr32_all_days_clicks[date_part] = 0
                             tr32_all_days_clicks[date_part] += clicks
+                
+                # Логируем все уникальные sub_id_4 с большим количеством кликов (подозрительные на TR32)
+                high_click_candidates = {}
+                for row in active_days_data.get('rows', []):
+                    creative_id = row.get('sub_id_4', 'unknown')
+                    clicks = int(row.get('clicks', 0))
+                    datetime_str = row.get('datetime', '')
+                    
+                    if clicks >= 50:  # Подозрительно высокие клики могут быть TR32
+                        if creative_id not in high_click_candidates:
+                            high_click_candidates[creative_id] = {'total_clicks': 0, 'days': set()}
+                        high_click_candidates[creative_id]['total_clicks'] += clicks
+                        if datetime_str:
+                            date_part = datetime_str.split('T')[0] if 'T' in datetime_str else datetime_str.split(' ')[0]
+                            high_click_candidates[creative_id]['days'].add(date_part)
+                
+                logger.info(f"TR32 possible IDs found: {tr32_possible_ids}")
+                logger.info(f"High-click candidates (50+ clicks per row): {dict(list(high_click_candidates.items())[:5])}")
                 
                 if tr32_all_days_clicks:
                     logger.info(f"TR32 ALL days with clicks (no threshold): {tr32_all_days_clicks}")
@@ -1247,7 +1272,10 @@ class KeitaroClient:
                 # Count tr32 rows to see if we're missing data
                 if creative_id == 'tr32':
                     tr32_rows_count += 1
+                    original_sub_id_4 = row.get('sub_id_4', 'unknown')
                     logger.info(f"tr32 RAW row #{tr32_rows_count}: buyer={buyer}, clicks={clicks}, unique_clicks={unique_clicks}, leads={leads_to_add}, revenue={row.get('revenue', 0)}")
+                    logger.info(f"tr32 ORIGINAL sub_id_4: '{original_sub_id_4}' (before normalization)")
+                    logger.info(f"tr32 NORMALIZED creative_id: '{creative_id}' (after normalization)")
                 
                 # Initialize creative data if not exists
                 if creative_id not in creatives_data:
