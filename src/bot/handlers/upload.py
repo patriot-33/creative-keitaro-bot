@@ -412,11 +412,20 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         file_io = await bot_instance.download_file(file_info.file_path)  # Получаем io.BytesIO
         file_bytes = file_io.read()  # Читаем реальные байты из потока
         
-        # ВРЕМЕННО: пропускаем Google Drive для отладки
-        # Создаем fake drive результат
+        # Загружаем файл в Google Drive
+        from integrations.google.drive import GoogleDriveService
+        
+        google_drive = GoogleDriveService()
+        file_id, web_view_link, sha256_hash_gdrive = await google_drive.upload_file(
+            file_content=file_bytes,
+            filename=file_name,
+            geo=geo,
+            mime_type=mime_type
+        )
+        
         drive_result = {
-            'file_id': f"temp_drive_id_{creative_id}",
-            'web_view_link': f"https://drive.google.com/file/d/temp_{creative_id}/view"
+            'file_id': file_id,
+            'web_view_link': web_view_link
         }
         
         # Создаем/находим пользователя в базе данных
@@ -424,10 +433,9 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         from db.models.creative import Creative
         from db.database import get_db_session
         from sqlalchemy import select
-        import hashlib
         
-        # Рассчитываем hash файла
-        sha256_hash = hashlib.sha256(file_bytes).hexdigest()
+        # Используем hash файла от Google Drive (уже рассчитан)
+        sha256_hash = sha256_hash_gdrive
         
         async with get_db_session() as session:
             # Ищем или создаем пользователя

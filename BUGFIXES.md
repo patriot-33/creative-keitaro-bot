@@ -312,6 +312,59 @@ stmt = (
 
 ---
 
+## Баг #12: Google Drive ссылки показывают временные URL
+
+### Проблема:
+**Дата**: 2025-08-10
+**Симптомы**: 
+- /my_creos показывает креативы, но ссылки Google Drive не работают
+- URL вида `https://drive.google.com/file/d/temp_IDHR100825054/view`
+- Google Drive показывает "Файл не обнаружен"
+
+### Причина:
+В upload.py использовались временные заглушки вместо реальной интеграции:
+```python
+# ВРЕМЕННО: пропускаем Google Drive для отладки
+drive_result = {
+    'file_id': f"temp_drive_id_{creative_id}",
+    'web_view_link': f"https://drive.google.com/file/d/temp_{creative_id}/view"
+}
+```
+
+### Решение:
+Активирована реальная интеграция с Google Drive:
+
+**Файл**: `src/bot/handlers/upload.py`
+```python
+# Было:
+# ВРЕМЕННО: пропускаем Google Drive для отладки
+drive_result = { 'file_id': f"temp_drive_id_{creative_id}", ... }
+
+# Стало:
+# Загружаем файл в Google Drive
+from integrations.google.drive import GoogleDriveService
+
+google_drive = GoogleDriveService()
+file_id, web_view_link, sha256_hash_gdrive = await google_drive.upload_file(
+    file_content=file_bytes,
+    filename=file_name,
+    geo=geo,
+    mime_type=mime_type
+)
+
+drive_result = {
+    'file_id': file_id,
+    'web_view_link': web_view_link
+}
+```
+
+### Результат:
+✅ Новые креативы будут загружаться в реальный Google Drive
+✅ Ссылки будут работать корректно
+✅ SHA256 хэш будет рассчитываться Google Drive Service
+
+---
+
 ## Баг #6: Dashboard показывает нулевые данные для Google трафика
 
 ### Проблема:
