@@ -949,15 +949,22 @@ class KeitaroClient:
                 'limit': 10000
             }
             
-            logger.info(f"Getting active days data...")
+            logger.info(f"=== ACTIVE DAYS REQUEST ===")
             logger.info(f"Active days API params: {active_days_params}")
             
             active_days_data = await self._make_request('/admin_api/v1/report/build', method='POST', json=active_days_params)
+            logger.info(f"Active days API response keys: {list(active_days_data.keys()) if active_days_data else 'None'}")
             
             # Process active days data to get unique dates per creative
             creative_active_days = {}
             if active_days_data and 'rows' in active_days_data:
                 logger.info(f"Active days API returned {len(active_days_data['rows'])} rows")
+                
+                # Log sample rows for debugging
+                if len(active_days_data['rows']) > 0:
+                    sample_row = active_days_data['rows'][0]
+                    logger.info(f"Sample active days row: {sample_row}")
+                
                 for row in active_days_data['rows']:
                     creative_id = row.get('sub_id_4', 'unknown')
                     if creative_id == 'unknown' or not creative_id:
@@ -976,10 +983,25 @@ class KeitaroClient:
                         if creative_id not in creative_active_days:
                             creative_active_days[creative_id] = set()
                         creative_active_days[creative_id].add(date_part)
+                        
+                        # Log tr32 specifically
+                        if creative_id == 'tr32':
+                            logger.info(f"tr32 active day found: date={date_part}, clicks={clicks}")
+                
+                # Log tr32 final count
+                if 'tr32' in creative_active_days:
+                    logger.info(f"tr32 total active days found: {len(creative_active_days['tr32'])}, dates: {sorted(creative_active_days['tr32'])}")
+                else:
+                    logger.warning("tr32 NOT FOUND in active days data")
+                    
             else:
-                logger.warning("No active days data received")
+                logger.warning(f"No active days data received. Response: {active_days_data}")
             
             logger.info(f"Processed active days for {len(creative_active_days)} creatives")
+            
+            # TEMPORARY: Check if we got any active days data at all
+            if not creative_active_days:
+                logger.warning("FALLBACK: No active days data received, will use default value of 1 for all creatives")
             
             # Process and aggregate main data by creative (accurate metrics)
             creatives_data = {}
@@ -1027,9 +1049,14 @@ class KeitaroClient:
                 creatives_data[creative_id]['clicks'] += clicks
                 creatives_data[creative_id]['unique_clicks'] += unique_clicks
                 creatives_data[creative_id]['conversions'] += int(row.get('conversions', 0))
-                creatives_data[creative_id]['leads'] += int(row.get('leads', 0))
+                leads_to_add = int(row.get('leads', 0))
+                creatives_data[creative_id]['leads'] += leads_to_add
                 creatives_data[creative_id]['deposits'] += int(row.get('sales', 0))
                 creatives_data[creative_id]['revenue'] += float(row.get('revenue', 0))
+                
+                # Debug tr32 leads aggregation
+                if creative_id == 'tr32':
+                    logger.info(f"tr32 row: country={country}, leads={leads_to_add}, total_leads_so_far={creatives_data[creative_id]['leads']}")
             
             # Calculate metrics and format result
             result = []
