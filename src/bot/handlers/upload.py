@@ -261,20 +261,24 @@ async def handle_file_upload(message: Message, state: FSMContext):
         )
         return
     
-    # Проверка расширения файла
+    # Определяем расширение файла
     if file_name:
-        file_ext = os.path.splitext(file_name.lower())[1]
-        if file_ext not in ALLOWED_EXTENSIONS:
-            await message.answer(
-                f"❌ <b>Неподдерживаемый формат файла!</b>\n\n"
-                f"📄 Ваш файл: {file_ext}\n\n"
-                f"✅ Поддерживаемые форматы:\n"
-                f"• Изображения: {', '.join([ext for ext in ALLOWED_EXTENSIONS if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']])}\n"
-                f"• Видео: {', '.join([ext for ext in ALLOWED_EXTENSIONS if ext in ['.mp4', '.mov']])}\n\n"
-                f"💡 Пожалуйста, загрузите файл в поддерживаемом формате.",
-                parse_mode="HTML"
-            )
-            return
+        file_ext = os.path.splitext(file_name.lower())[1] if '.' in file_name else '.unknown'
+    else:
+        file_ext = '.unknown'
+    
+    # Проверка расширения файла
+    if file_ext not in ALLOWED_EXTENSIONS and file_ext != '.unknown':
+        await message.answer(
+            f"❌ <b>Неподдерживаемый формат файла!</b>\n\n"
+            f"📄 Ваш файл: {file_ext}\n\n"
+            f"✅ Поддерживаемые форматы:\n"
+            f"• Изображения: {', '.join([ext for ext in ALLOWED_EXTENSIONS if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']])}\n"
+            f"• Видео: {', '.join([ext for ext in ALLOWED_EXTENSIONS if ext in ['.mp4', '.mov']])}\n\n"
+            f"💡 Пожалуйста, загрузите файл в поддерживаемом формате.",
+            parse_mode="HTML"
+        )
+        return
     
     # Сохраняем информацию о файле
     user_data = await state.get_data()
@@ -285,10 +289,12 @@ async def handle_file_upload(message: Message, state: FSMContext):
         telegram_file_id=file_obj.file_id,
         file_name=file_name,
         file_size=file_size,
-        file_ext=file_ext if file_name else '.unknown'
+        file_ext=file_ext
     )
     
+    logger.info(f"File processed: {file_name}, size: {file_size}, ext: {file_ext}, geo: {geo}")
     await state.set_state(UploadStates.waiting_notes)
+    logger.info("State set to waiting_notes")
     
     # Клавиатура для добавления заметок
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -310,8 +316,9 @@ async def handle_file_upload(message: Message, state: FSMContext):
 Описание поможет другим пользователям понять содержание креатива.
 """
     
+    logger.info("Sending notes prompt message to user")
     await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
-    logger.info(f"User {user.id} uploaded file: {file_name} ({file_size} bytes)")
+    logger.info(f"User {user.id} uploaded file: {file_name} ({file_size} bytes) - notes prompt sent")
 
 @router.callback_query(F.data == "add_notes")
 async def handle_add_notes(callback: CallbackQuery, state: FSMContext):
