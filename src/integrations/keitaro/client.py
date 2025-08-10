@@ -1033,7 +1033,8 @@ class KeitaroClient:
                     for date_part, total_clicks in daily_data.items():
                         # ДИАГНОСТИКА: логируем tr32
                         if creative_id == 'tr32':
-                            logger.info(f"tr32 daily summary: date={date_part}, total_clicks={total_clicks}, is_active={total_clicks >= 10}")
+                            logger.info(f"TR32 DAILY BREAKDOWN: date={date_part}, total_clicks={total_clicks}, is_active={total_clicks >= 10}")
+                            logger.info(f"  -> Adding to active days: {total_clicks >= 10}")
                         
                         if total_clicks >= 10:
                             if creative_id not in creative_active_days:
@@ -1051,21 +1052,32 @@ class KeitaroClient:
                 logger.info(f"Searching for TR32 in active days data...")
                 tr32_possible_ids = set()  # Соберем все возможные ID для tr32
                 
-                # Проверим сколько дней tr32 имел клики БЕЗ порога  
+                # НОВАЯ ДИАГНОСТИКА: Проверим сколько дней tr32 имел клики БЕЗ порога  
                 tr32_all_days_clicks = {}
+                tr32_raw_rows_found = 0
                 for row in active_days_data.get('rows', []):
                     creative_id = row.get('sub_id_4', 'unknown')
                     
                     # Ищем tr32 (маленькими буквами) - Keitaro чувствителен к регистру!
                     if str(creative_id) == 'tr32':
+                        tr32_raw_rows_found += 1
                         tr32_possible_ids.add(creative_id)
                         datetime_str = row.get('datetime', '')
                         clicks = int(row.get('clicks', 0))
+                        
+                        # ДЕТАЛЬНЫЙ ЛОГ каждой строки TR32
+                        logger.info(f"TR32 raw row #{tr32_raw_rows_found}: datetime='{datetime_str}', clicks={clicks}")
+                        
                         if datetime_str:
                             date_part = datetime_str.split('T')[0] if 'T' in datetime_str else datetime_str.split(' ')[0]
+                            logger.info(f"  -> extracted date_part: '{date_part}'")
+                            
                             if date_part not in tr32_all_days_clicks:
                                 tr32_all_days_clicks[date_part] = 0
                             tr32_all_days_clicks[date_part] += clicks
+                            logger.info(f"  -> date_part '{date_part}' now has total {tr32_all_days_clicks[date_part]} clicks")
+                
+                logger.info(f"TR32 ANALYSIS: Found {tr32_raw_rows_found} raw rows in active_days_data")
                 
                 # Логируем все уникальные sub_id_4 с большим количеством кликов (подозрительные на TR32)
                 high_click_candidates = {}
