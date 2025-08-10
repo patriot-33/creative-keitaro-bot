@@ -211,6 +211,40 @@ async def sync_settings_with_database():
     except Exception as e:
         logger.error(f"Failed to sync settings with database: {e}")
 
+async def delete_user_from_database(user_id: int) -> bool:
+    """Удаление пользователя из базы данных"""
+    try:
+        async with get_db_session() as session:
+            # Найдем пользователя
+            result = await session.execute(select(User).where(User.tg_user_id == user_id))
+            user = result.scalar_one_or_none()
+            
+            if user:
+                # Сначала удалим связанные записи или установим NULL для FK
+                # Найдем всех пользователей, которых он создал
+                created_users_result = await session.execute(
+                    select(User).where(User.created_by_id == user.id)
+                )
+                created_users = created_users_result.scalars().all()
+                
+                # Устанавливаем created_by_id = NULL для созданных им пользователей
+                for created_user in created_users:
+                    created_user.created_by_id = None
+                
+                # Теперь можем удалить пользователя
+                await session.delete(user)
+                await session.commit()
+                
+                logger.info(f"User {user_id} deleted from database, {len(created_users)} dependent records updated")
+                return True
+            else:
+                logger.warning(f"User {user_id} not found in database for deletion")
+                return True  # Считаем успехом, если уже нет в БД
+                
+    except Exception as e:
+        logger.error(f"Failed to delete user {user_id} from database: {e}")
+        return False
+
 # ===== РЕГИСТРАЦИЯ НОВЫХ ПОЛЬЗОВАТЕЛЕЙ =====
 
 @router.message(Command("register"))
@@ -1112,11 +1146,11 @@ async def handle_delete_user_confirm(callback: CallbackQuery):
     
     users = settings.allowed_users
     
-    if target_id not in users:
+    # Проверяем и int и str ключи
+    user_info = users.get(target_id) or users.get(str(target_id))
+    if not user_info:
         await callback.answer("❌ Пользователь не найден!", show_alert=True)
         return
-    
-    user_info = users[target_id]
     role = user_info.get('role')
     
     # Проверяем права
@@ -1162,19 +1196,26 @@ async def handle_confirm_delete_user(callback: CallbackQuery):
     
     users = settings.allowed_users
     
-    if target_id not in users:
+    # Проверяем и int и str ключи
+    user_info = users.get(target_id) or users.get(str(target_id))
+    if not user_info:
         await callback.answer("❌ Пользователь не найден!", show_alert=True)
         return
     
-    user_info = users[target_id]
     role = user_info.get('role')
     
     if not can_delete_user(admin_id, role, target_id):
         await callback.answer("❌ Недостаточно прав!", show_alert=True)
         return
     
-    # Удаляем
-    del users[target_id]
+    # Удаляем из базы данных
+    await delete_user_from_database(target_id)
+    
+    # Удаляем из settings (поддерживаем и int и str ключи)
+    if target_id in users:
+        del users[target_id]
+    elif str(target_id) in users:
+        del users[str(target_id)]
     
     if save_users(users):
         settings.allowed_users = users
@@ -1208,8 +1249,10 @@ async def handle_btn_refresh_manage(callback: CallbackQuery):
 def can_delete_user(admin_id: int, target_role: str, target_id: int) -> bool:
     """Проверка прав на удаление пользователя"""
     users = settings.allowed_users
-    admin_info = users.get(admin_id, {})
+    admin_info = users.get(admin_id, {}) or users.get(str(admin_id), {})
     admin_role = admin_info.get('role', '')
+    
+    logger.info(f"Delete check: admin {admin_id} (role={admin_role}) wants to delete {target_id} (role={target_role})")
     
     # Нельзя удалить самого себя
     if admin_id == target_id:
