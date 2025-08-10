@@ -890,6 +890,13 @@ class KeitaroClient:
             logger.info(f"get_creatives_report called with: period={period}, buyer_id={buyer_id}, geo={geo}, traffic_source_ids={traffic_source_ids}")
             logger.info(f"Date range: {start_date} - {end_date}")
             
+            # ВАЖНО: Логируем точные даты для проверки исправления
+            from datetime import datetime
+            now_debug = datetime.now()
+            logger.info(f"DEBUG: Current time is {now_debug}")
+            logger.info(f"DEBUG: For LAST_7D we should use dates from {(now_debug - timedelta(days=7)).strftime('%Y-%m-%d')} to {(now_debug - timedelta(days=1)).strftime('%Y-%m-%d')}")
+            logger.info(f"DEBUG: ACTUAL dates being used: {start_date} to {end_date}")
+            
             # FIRST REQUEST: Get main metrics without datetime for accurate aggregation
             # Try without country grouping to avoid splitting data across countries
             main_report_params = {
