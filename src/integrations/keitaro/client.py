@@ -891,7 +891,7 @@ class KeitaroClient:
                     'country',       # GEO
                     'datetime',      # For active days calculation
                     'clicks', 
-                    'unique_clicks', 
+                    'global_unique_clicks',  # Use global unique clicks
                     'conversions',
                     'leads',
                     'sales',
@@ -905,7 +905,7 @@ class KeitaroClient:
                     }
                 ],
                 'grouping': ['sub_id_4', 'sub_id_1', 'country', 'datetime'],
-                'metrics': ['clicks', 'unique_clicks', 'conversions', 'leads', 'sales', 'revenue'],
+                'metrics': ['clicks', 'global_unique_clicks', 'conversions', 'leads', 'sales', 'revenue'],
                 'sort': [{'name': 'revenue', 'order': 'DESC'}],
                 'limit': 10000  # Get more data for active days calculation
             }
@@ -976,7 +976,7 @@ class KeitaroClient:
                 # Aggregate data
                 creatives_data[creative_id]['geos'].add(country)
                 creatives_data[creative_id]['clicks'] += clicks
-                creatives_data[creative_id]['unique_clicks'] += int(row.get('unique_clicks', 0))
+                creatives_data[creative_id]['unique_clicks'] += int(row.get('global_unique_clicks', 0))
                 creatives_data[creative_id]['conversions'] += int(row.get('conversions', 0))
                 creatives_data[creative_id]['leads'] += int(row.get('leads', 0))
                 creatives_data[creative_id]['deposits'] += int(row.get('sales', 0))
