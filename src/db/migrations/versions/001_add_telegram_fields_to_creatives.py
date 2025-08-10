@@ -32,6 +32,8 @@ def upgrade() -> None:
         sa.Column('full_name', sa.String(), nullable=True),
         sa.Column('role', sa.Enum('OWNER', 'MEMBER', name='userrole'), nullable=False),
         sa.Column('buyer_id', sa.String(), nullable=True),
+        sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'),
+        sa.Column('created_by_id', sa.Integer(), nullable=True),
         sa.Column('google_access_token', sa.String(), nullable=True),
         sa.Column('google_refresh_token', sa.String(), nullable=True),
         sa.Column('google_token_expires_at', sa.DateTime(timezone=True), nullable=True),
@@ -40,6 +42,24 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('tg_user_id')
         )
+    else:
+        # Table exists, add Google OAuth columns if they don't exist
+        existing_columns = [col['name'] for col in inspector.get_columns('users')]
+        
+        if 'google_access_token' not in existing_columns:
+            op.add_column('users', sa.Column('google_access_token', sa.String(), nullable=True))
+        
+        if 'google_refresh_token' not in existing_columns:
+            op.add_column('users', sa.Column('google_refresh_token', sa.String(), nullable=True))
+        
+        if 'google_token_expires_at' not in existing_columns:
+            op.add_column('users', sa.Column('google_token_expires_at', sa.DateTime(timezone=True), nullable=True))
+        
+        if 'is_active' not in existing_columns:
+            op.add_column('users', sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'))
+        
+        if 'created_by_id' not in existing_columns:
+            op.add_column('users', sa.Column('created_by_id', sa.Integer(), nullable=True))
     
     if 'geo_counters' not in existing_tables:
         op.create_table('geo_counters',
