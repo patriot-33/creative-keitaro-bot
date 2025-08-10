@@ -583,6 +583,8 @@ class KeitaroClient:
                             buyer_stats[buyer]['clicks'] = row.get('clicks', 0)
                             buyer_stats[buyer]['unique_visitors'] = row.get('global_unique_clicks', 0)
                             buyer_stats[buyer]['cost'] = float(row.get('cost', 0))
+                            # Add leads data from report API
+                            buyer_stats[buyer]['leads'] = row.get('conversions', 0)  # Use conversions as leads
             except Exception as e:
                 logger.warning(f"Could not get click data (continuing with conversion data only): {e}")
                 # Continue without click data - conversion data is more important
