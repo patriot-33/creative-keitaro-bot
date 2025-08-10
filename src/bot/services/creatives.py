@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import get_db_session
 from db.models.creative import Creative
+from db.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +28,27 @@ class CreativesService:
         """Получить креативы пользователя"""
         try:
             async with get_db_session() as session:
+                # Сначала найдем пользователя по Telegram ID
+                user_stmt = select(User).where(User.tg_user_id == user_id)
+                user_result = await session.execute(user_stmt)
+                db_user = user_result.scalar_one_or_none()
+                
+                if not db_user:
+                    logger.warning(f"User with tg_user_id {user_id} not found")
+                    return []
+                
+                # Теперь найдем креативы этого пользователя
                 stmt = (
                     select(Creative)
-                    .where(Creative.uploader_user_id == user_id)
+                    .where(Creative.uploader_user_id == db_user.id)
                     .order_by(desc(Creative.upload_dt))
                     .limit(limit)
                     .offset(offset)
                 )
                 result = await session.execute(stmt)
-                return result.scalars().all()
+                creatives = result.scalars().all()
+                logger.info(f"Found {len(creatives)} creatives for user {user_id} (db_user.id={db_user.id})")
+                return creatives
         except Exception as e:
             logger.error(f"Error getting user creatives: {e}")
             return []
@@ -57,13 +70,24 @@ class CreativesService:
         """Подсчитать количество креативов пользователя"""
         try:
             async with get_db_session() as session:
+                # Сначала найдем пользователя по Telegram ID
+                user_stmt = select(User).where(User.tg_user_id == user_id)
+                user_result = await session.execute(user_stmt)
+                db_user = user_result.scalar_one_or_none()
+                
+                if not db_user:
+                    logger.warning(f"User with tg_user_id {user_id} not found for counting")
+                    return 0
+                
                 from sqlalchemy import func
                 stmt = (
                     select(func.count(Creative.creative_id))
-                    .where(Creative.uploader_user_id == user_id)
+                    .where(Creative.uploader_user_id == db_user.id)
                 )
                 result = await session.execute(stmt)
-                return result.scalar() or 0
+                count = result.scalar() or 0
+                logger.info(f"User {user_id} (db_user.id={db_user.id}) has {count} creatives")
+                return count
         except Exception as e:
             logger.error(f"Error counting user creatives: {e}")
             return 0
