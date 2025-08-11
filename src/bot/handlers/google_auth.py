@@ -30,7 +30,7 @@ async def cmd_google_auth(message: Message):
     
     # Check if user has access
     allowed_users = settings.allowed_users
-    user_info = allowed_users.get(user.id)
+    user_info = allowed_users.get(user.id) or allowed_users.get(str(user.id))
     
     if not user_info:
         await message.answer("❌ У вас нет доступа к этой функции.")

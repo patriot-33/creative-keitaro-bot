@@ -37,7 +37,9 @@ async def cmd_reports(message: Message, state: FSMContext):
     
     # Проверка доступа
     allowed_users = settings.allowed_users
-    user_info = allowed_users.get(user.id)
+    user_info = allowed_users.get(user.id) or allowed_users.get(str(user.id))
+    
+    logger.info(f"Reports access check for user {user.id}: user_info={user_info}")
     
     if not user_info:
         await message.answer("❌ У вас нет доступа к отчетам.")

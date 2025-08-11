@@ -87,7 +87,7 @@ async def cmd_upload(message: Message, state: FSMContext):
     
     # Проверка доступа
     allowed_users = settings.allowed_users
-    user_info = allowed_users.get(user.id)
+    user_info = allowed_users.get(user.id) or allowed_users.get(str(user.id))
     
     if not user_info:
         await message.answer("❌ У вас нет доступа к загрузке креативов.")
@@ -407,7 +407,7 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         mime_type = 'image/gif'
     
     # Получаем информацию о пользователе
-    user_info = settings.allowed_users.get(user.id, {})
+    user_info = settings.allowed_users.get(user.id, {}) or settings.allowed_users.get(str(user.id), {})
     buyer_id = user_info.get('buyer_id', '')
     
     await callback.message.edit_text("⏳ <b>Сохраняем креатив...</b>", parse_mode="HTML")
