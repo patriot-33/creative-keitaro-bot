@@ -1279,10 +1279,10 @@ class KeitaroClient:
                 
                 logger.info(f"=== TR32 DIAGNOSTICS END ===")
                 
-                # ОБРАБОТКА ГЕО ДАННЫХ ИЗ КОНВЕРСИЙ
-                # Переопределяем creative_countries на основе конверсий вместо кликов
-                logger.info(f"Processing {len(rows)} conversion rows for geo extraction...")
-                creative_countries_from_conversions = {}
+                # ОБРАБОТКА ГЕО ДАННЫХ ИЗ ДЕПОЗИТОВ (SALES)
+                # Показываем только страны, из которых есть депозиты
+                logger.info(f"Processing {len(rows)} conversion rows for geo extraction from DEPOSITS...")
+                creative_countries_from_deposits = {}
                 tr36_all_rows = []
                 creative_id_mapping = {}  # To track case variations
                 
@@ -1312,21 +1312,22 @@ class KeitaroClient:
                     if creative_id_upper not in creative_id_mapping:
                         creative_id_mapping[creative_id_upper] = creative_id
                     
-                    # Берем только конверсии (lead, sale), не все записи
+                    # ИСПРАВЛЕНО: Берем ТОЛЬКО ДЕПОЗИТЫ (sale), не лиды
                     status = row.get('status', '')
-                    if status not in ['lead', 'sale']:
+                    if status != 'sale':
                         continue
                         
                     country = row.get('country', 'unknown')
                     if country and country != 'unknown':
                         # Use the original creative_id for consistency with main data
-                        if creative_id not in creative_countries_from_conversions:
-                            creative_countries_from_conversions[creative_id] = set()
-                        creative_countries_from_conversions[creative_id].add(country)
+                        if creative_id not in creative_countries_from_deposits:
+                            creative_countries_from_deposits[creative_id] = set()
+                        creative_countries_from_deposits[creative_id].add(country)
                         
-                        # Log tr32 and TR36 conversion countries
+                        # Log tr32 and TR36 deposit countries
                         if creative_id_upper in ['TR32', 'TR36']:
-                            logger.info(f"{creative_id} (original) / {creative_id_upper} (normalized) conversion country: {country} (status: {status})")
+                            revenue = row.get('revenue', 0)
+                            logger.info(f"{creative_id} (original) / {creative_id_upper} (normalized) DEPOSIT country: {country} (status: {status}, revenue: ${revenue})")
                 
                 # TR36 диагностика
                 logger.info(f"=== TR36 DIAGNOSTICS START ===")
@@ -1339,7 +1340,7 @@ class KeitaroClient:
                     
                     # Check for TR36 in different case variations
                     tr36_variations = []
-                    for creative_id, countries in creative_countries_from_conversions.items():
+                    for creative_id, countries in creative_countries_from_deposits.items():
                         if str(creative_id).upper() == 'TR36':
                             tr36_variations.append({
                                 'creative_id': creative_id,
@@ -1349,28 +1350,58 @@ class KeitaroClient:
                     if tr36_variations:
                         logger.info(f"TR36 case variations found: {tr36_variations}")
                         for variation in tr36_variations:
-                            logger.info(f"TR36 variant '{variation['creative_id']}' countries: {variation['countries']}")
+                            logger.info(f"TR36 variant '{variation['creative_id']}' DEPOSIT countries: {variation['countries']}")
                     else:
-                        logger.warning("TR36 NOT FOUND in creative_countries_from_conversions in any case variation")
+                        logger.warning("TR36 NOT FOUND in creative_countries_from_deposits in any case variation")
                         
                         # Additional debugging: check what creative IDs we actually have
-                        all_creative_ids = list(creative_countries_from_conversions.keys())
-                        logger.info(f"All creative IDs in conversions geo data: {all_creative_ids}")
+                        all_creative_ids = list(creative_countries_from_deposits.keys())
+                        logger.info(f"All creative IDs in DEPOSITS geo data: {all_creative_ids}")
                         tr_ids = [cid for cid in all_creative_ids if 'tr' in str(cid).lower()]
-                        logger.info(f"All TR-related creative IDs: {tr_ids}")
+                        logger.info(f"All TR-related creative IDs with DEPOSITS: {tr_ids}")
                         
+                # ДОПОЛНИТЕЛЬНЫЙ АНАЛИЗ ДЕПОЗИТОВ ПО СТРАНАМ для TR36
+                logger.info(f"=== TR36 DEPOSITS BY COUNTRY ANALYSIS ===")
+                tr36_deposits_by_country = {}
+                tr36_total_deposits = 0
+                
+                for row in rows:
+                    creative_id_raw = row.get('sub_id_4', 'unknown')
+                    if str(creative_id_raw).upper() == 'TR36':
+                        status = row.get('status', '')
+                        country = row.get('country', 'unknown')
+                        revenue = float(row.get('revenue', 0))
+                        
+                        if status == 'sale' and country != 'unknown':
+                            if country not in tr36_deposits_by_country:
+                                tr36_deposits_by_country[country] = {'count': 0, 'revenue': 0.0}
+                            tr36_deposits_by_country[country]['count'] += 1
+                            tr36_deposits_by_country[country]['revenue'] += revenue
+                            tr36_total_deposits += 1
+                
+                if tr36_deposits_by_country:
+                    logger.info(f"TR36 total deposits found: {tr36_total_deposits}")
+                    for country, data in tr36_deposits_by_country.items():
+                        percentage = (data['count'] / tr36_total_deposits * 100) if tr36_total_deposits > 0 else 0
+                        logger.info(f"TR36 deposits from {country}: {data['count']} deposits (${data['revenue']:.2f} revenue, {percentage:.1f}%)")
+                    
+                    expected_countries = list(tr36_deposits_by_country.keys())
+                    logger.info(f"TR36 EXPECTED GEO STRING: {', '.join(sorted(expected_countries))}")
+                else:
+                    logger.warning("TR36 has NO DEPOSITS - should show 'Unknown' in geo")
+                
                 logger.info(f"=== TR36 DIAGNOSTICS END ===")
                 
-                # Используем гео данные из конверсий вместо кликов
-                logger.info(f"GEO FROM CONVERSIONS: {len(creative_countries_from_conversions)} creatives have conversion geo data")
-                if creative_countries_from_conversions:
-                    creative_countries = creative_countries_from_conversions
-                    logger.info("✅ Using geo data from CONVERSIONS instead of clicks")
+                # Используем гео данные из ДЕПОЗИТОВ вместо кликов
+                logger.info(f"GEO FROM DEPOSITS: {len(creative_countries_from_deposits)} creatives have deposit geo data")
+                if creative_countries_from_deposits:
+                    creative_countries = creative_countries_from_deposits
+                    logger.info("✅ Using geo data from DEPOSITS instead of clicks")
                     for creative_id, countries in creative_countries.items():
                         if str(creative_id).upper() in ['TR32', 'TR36']:
-                            logger.info(f"{creative_id} FINAL geo from conversions: {countries}")
+                            logger.info(f"{creative_id} FINAL geo from DEPOSITS: {countries}")
                 else:
-                    logger.info("⚠️ No geo data from conversions, falling back to clicks data")
+                    logger.info("⚠️ No geo data from deposits, falling back to clicks data")
             else:
                 logger.warning("No conversions log data received")
             
