@@ -13,6 +13,10 @@ echo "Bot Token (last 8 chars): ...${TELEGRAM_BOT_TOKEN: -8}"
 # Check for force takeover mode
 if [ "$FORCE_BOT_TAKEOVER" = "true" ]; then
     echo "⚠️  FORCE_BOT_TAKEOVER mode enabled - will aggressively claim bot"
+else
+    # TEMPORARY: Force enable takeover mode for this deployment
+    echo "🔧 TEMPORARY: Enabling force takeover mode due to persistent conflicts"
+    export FORCE_BOT_TAKEOVER=true
 fi
 
 # Function to check if PostgreSQL is ready
