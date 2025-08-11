@@ -124,10 +124,10 @@ class ReportsService:
                     traffic_source_ids = await self._get_traffic_source_filter(traffic_source)
                     
                     if traffic_source and traffic_source_ids:
-                        # Получаем данные по источникам трафика с фильтрацией
+                        # Получаем реальные данные по байерам с фильтрацией источников трафика
                         if custom_dates:
                             start_date, end_date = custom_dates
-                            traffic_data = await keitaro.get_stats_by_traffic_sources(
+                            buyers_data = await keitaro.get_buyers_by_traffic_source(
                                 period=ReportPeriod.CUSTOM,
                                 traffic_source_ids=traffic_source_ids,
                                 custom_start=start_date,
@@ -135,13 +135,12 @@ class ReportsService:
                             )
                         else:
                             period_enum = self._period_to_enum(period)
-                            traffic_data = await keitaro.get_stats_by_traffic_sources(
+                            buyers_data = await keitaro.get_buyers_by_traffic_source(
                                 period=period_enum,
                                 traffic_source_ids=traffic_source_ids
                             )
                         
-                        # Создаем агрегированные данные из источников трафика для dashboard
-                        buyers_data = self._convert_traffic_data_to_buyers_format(traffic_data)
+                        logger.info(f"Dashboard FB: Got {len(buyers_data)} real buyers with traffic source filter")
                         
                     else:
                         # Получаем обычные данные по байерам (без фильтрации источников)
