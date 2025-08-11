@@ -263,9 +263,80 @@ async def sync_file_users_to_database(session, file_users):
     await session.commit()
     logger.info("=== SYNC COMPLETED ===")
 
+async def force_bot_takeover():
+    """Aggressively claim bot control to resolve TelegramConflictError"""
+    import os
+    import aiohttp
+    
+    logger.info("💪 EMERGENCY: Attempting aggressive bot takeover...")
+    
+    token = os.getenv('TELEGRAM_BOT_TOKEN')
+    if not token:
+        logger.error('⚠️  No TELEGRAM_BOT_TOKEN found')
+        return False
+    
+    base_url = f'https://api.telegram.org/bot{token}'
+    
+    try:
+        connector = aiohttp.TCPConnector(enable_cleanup_closed=True)
+        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=20)) as session:
+            
+            logger.info('🔥 Step 1: Force delete webhook with drop_pending_updates')
+            async with session.post(f'{base_url}/deleteWebhook', json={'drop_pending_updates': True}) as resp:
+                result = await resp.json()
+                logger.info(f'  Webhook delete result: {result}')
+                
+            await asyncio.sleep(3)
+            
+            logger.info('🔥 Step 2: Aggressive getUpdates with high offset to skip all')
+            async with session.post(f'{base_url}/getUpdates', json={'offset': 999999999, 'limit': 1, 'timeout': 0}) as resp:
+                result = await resp.json()
+                logger.info(f'  High offset getUpdates result: {result}')
+                
+            await asyncio.sleep(2)
+            
+            logger.info('🔥 Step 3: Multiple rapid getUpdates to exhaust the queue')
+            for i in range(10):
+                logger.info(f'    Rapid getUpdates #{i+1}...')
+                async with session.post(f'{base_url}/getUpdates', json={'offset': -1, 'limit': 100, 'timeout': 0}) as resp:
+                    result = await resp.json()
+                    updates_count = len(result.get('result', []))
+                    logger.info(f'      Got {updates_count} updates')
+                    if updates_count == 0:
+                        break
+                await asyncio.sleep(0.1)
+            
+            logger.info('🔥 Step 4: Set webhook to dummy URL to block other instances')
+            dummy_url = 'https://httpbin.org/status/200'  # Safe dummy webhook
+            async with session.post(f'{base_url}/setWebhook', json={'url': dummy_url, 'drop_pending_updates': True}) as resp:
+                result = await resp.json()
+                logger.info(f'  Dummy webhook set result: {result}')
+            
+            await asyncio.sleep(5)  # Give more time for other instances to fail
+            
+            logger.info('🔥 Step 5: Remove dummy webhook and prepare for polling')
+            async with session.post(f'{base_url}/deleteWebhook', json={'drop_pending_updates': True}) as resp:
+                result = await resp.json()
+                logger.info(f'  Dummy webhook removed result: {result}')
+            
+            logger.info('✅ Bot takeover completed successfully')
+            return True
+            
+    except Exception as e:
+        logger.error(f'❌ Bot takeover failed: {e}')
+        return False
+
 async def on_startup():
     """Startup tasks"""
     logger.info("Starting bot...")
+    
+    # EMERGENCY: Force bot takeover to resolve TelegramConflictError
+    logger.info("🚨 EMERGENCY MODE: Performing aggressive bot takeover")
+    await force_bot_takeover()
+    
+    # Give Telegram API time to process the takeover
+    logger.info("⏳ Waiting 10 seconds for Telegram API to process takeover...")
+    await asyncio.sleep(10)
     
     # Load users from database
     await load_users_from_database()
