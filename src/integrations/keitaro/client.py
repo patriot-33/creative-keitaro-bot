@@ -1171,9 +1171,9 @@ class KeitaroClient:
                             creative_countries[creative_id] = set()
                         creative_countries[creative_id].add(country)
                         
-                        # Log tr32 countries
-                        if creative_id == 'tr32':
-                            logger.info(f"tr32 country found: {country}")
+                        # Log tr32 and TR36 countries from clicks
+                        if creative_id in ['tr32', 'TR36']:
+                            logger.info(f"{creative_id} CLICK country found: {country}")
             else:
                 logger.warning("No geo data received")
                 
@@ -1280,9 +1280,22 @@ class KeitaroClient:
                 
                 # ОБРАБОТКА ГЕО ДАННЫХ ИЗ КОНВЕРСИЙ
                 # Переопределяем creative_countries на основе конверсий вместо кликов
+                logger.info(f"Processing {len(rows)} conversion rows for geo extraction...")
                 creative_countries_from_conversions = {}
+                tr36_all_rows = []
+                
                 for row in rows:
                     creative_id = row.get('sub_id_4', 'unknown')
+                    
+                    # Собираем все строки TR36 для диагностики
+                    if creative_id == 'TR36':
+                        tr36_all_rows.append({
+                            'creative_id': creative_id,
+                            'status': row.get('status', 'unknown'),
+                            'country': row.get('country', 'unknown'),
+                            'postback_datetime': row.get('postback_datetime', 'unknown')
+                        })
+                    
                     if (creative_id == 'unknown' or not creative_id or 
                         creative_id in ['{sub_id_4}', 'null', '', ' '] or
                         str(creative_id).strip() == ''):
@@ -1299,9 +1312,21 @@ class KeitaroClient:
                             creative_countries_from_conversions[creative_id] = set()
                         creative_countries_from_conversions[creative_id].add(country)
                         
-                        # Log tr32 conversion countries
-                        if creative_id == 'tr32':
-                            logger.info(f"tr32 conversion country: {country} (status: {status})")
+                        # Log tr32 and TR36 conversion countries
+                        if creative_id in ['tr32', 'TR36']:
+                            logger.info(f"{creative_id} conversion country: {country} (status: {status})")
+                
+                # TR36 диагностика
+                logger.info(f"=== TR36 DIAGNOSTICS START ===")
+                logger.info(f"TR36 total rows found in conversions: {len(tr36_all_rows)}")
+                if tr36_all_rows:
+                    for row in tr36_all_rows[:5]:  # Показываем первые 5 строк
+                        logger.info(f"TR36 row: {row}")
+                    if 'TR36' in creative_countries_from_conversions:
+                        logger.info(f"TR36 countries from conversions: {creative_countries_from_conversions['TR36']}")
+                    else:
+                        logger.warning("TR36 NOT FOUND in creative_countries_from_conversions")
+                logger.info(f"=== TR36 DIAGNOSTICS END ===")
                 
                 # Используем гео данные из конверсий вместо кликов
                 logger.info(f"GEO FROM CONVERSIONS: {len(creative_countries_from_conversions)} creatives have conversion geo data")
@@ -1309,8 +1334,8 @@ class KeitaroClient:
                     creative_countries = creative_countries_from_conversions
                     logger.info("✅ Using geo data from CONVERSIONS instead of clicks")
                     for creative_id, countries in creative_countries.items():
-                        if creative_id == 'tr32':
-                            logger.info(f"tr32 FINAL geo from conversions: {countries}")
+                        if creative_id in ['tr32', 'TR36']:
+                            logger.info(f"{creative_id} FINAL geo from conversions: {countries}")
                 else:
                     logger.info("⚠️ No geo data from conversions, falling back to clicks data")
             else:
