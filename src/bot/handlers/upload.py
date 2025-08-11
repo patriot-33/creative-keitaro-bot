@@ -42,12 +42,34 @@ def load_custom_geos() -> List[str]:
 def save_custom_geos(custom_geos: List[str]) -> bool:
     """Сохранение пользовательских ГЕО в файл"""
     try:
+        # CRITICAL FIX: Ensure directory exists before creating file
+        os.makedirs(os.path.dirname(CUSTOM_GEOS_FILE), exist_ok=True)
+        logger.error(f"🔧 CUSTOM GEOS: Created/verified directory: {os.path.dirname(CUSTOM_GEOS_FILE)}")
+        
         data = {'custom_geos': custom_geos}
+        logger.error(f"🔧 CUSTOM GEOS: Saving {len(custom_geos)} geos to {CUSTOM_GEOS_FILE}")
+        logger.error(f"🔧 CUSTOM GEOS: Data to save: {data}")
+        
         with open(CUSTOM_GEOS_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+        
+        # Verify the file was created
+        if os.path.exists(CUSTOM_GEOS_FILE):
+            logger.error(f"✅ CUSTOM GEOS: File successfully created at {CUSTOM_GEOS_FILE}")
+            with open(CUSTOM_GEOS_FILE, 'r', encoding='utf-8') as f:
+                saved_data = json.load(f)
+                logger.error(f"✅ CUSTOM GEOS: Verified saved data: {saved_data}")
+        else:
+            logger.error(f"❌ CUSTOM GEOS: File was not created at {CUSTOM_GEOS_FILE}")
+            return False
+            
         return True
     except Exception as e:
-        logger.error(f"Error saving custom geos: {e}")
+        logger.error(f"❌ CUSTOM GEOS: Error saving custom geos: {e}")
+        logger.error(f"❌ CUSTOM GEOS: Working directory: {os.getcwd()}")
+        logger.error(f"❌ CUSTOM GEOS: Target file path: {CUSTOM_GEOS_FILE}")
+        logger.error(f"❌ CUSTOM GEOS: Directory exists: {os.path.exists(os.path.dirname(CUSTOM_GEOS_FILE))}")
+        logger.error(f"❌ CUSTOM GEOS: Directory writable: {os.access(os.path.dirname(CUSTOM_GEOS_FILE) if os.path.exists(os.path.dirname(CUSTOM_GEOS_FILE)) else '.', os.W_OK)}")
         return False
 
 def get_all_geos() -> List[str]:
@@ -620,8 +642,13 @@ async def handle_custom_geo_input(message: Message, state: FSMContext):
         return
     
     # Добавляем новый ГЕО
+    logger.error(f"🔧 CUSTOM GEO: User {message.from_user.id} attempting to add new GEO: {geo_code}")
+    
     custom_geos = load_custom_geos()
+    logger.error(f"🔧 CUSTOM GEO: Current custom geos before adding: {custom_geos}")
+    
     custom_geos.append(geo_code)
+    logger.error(f"🔧 CUSTOM GEO: Custom geos after adding: {custom_geos}")
     
     if save_custom_geos(custom_geos):
         # Устанавливаем новый ГЕО как выбранный
@@ -654,9 +681,10 @@ async def handle_custom_geo_input(message: Message, state: FSMContext):
         
         await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
         
-        logger.info(f"User {message.from_user.id} added custom GEO: {geo_code}")
+        logger.error(f"✅ CUSTOM GEO SUCCESS: User {message.from_user.id} successfully added custom GEO: {geo_code}")
         
     else:
+        logger.error(f"❌ CUSTOM GEO FAILED: User {message.from_user.id} failed to add custom GEO: {geo_code}")
         await message.answer(
             "❌ <b>Ошибка при сохранении ГЕО!</b>\n\n"
             "🔧 Попробуйте еще раз или обратитесь к администратору.",

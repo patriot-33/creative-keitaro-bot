@@ -31,7 +31,7 @@ COPY alembic.ini ./
 COPY start.sh ./
 
 # Create necessary directories
-RUN mkdir -p logs downloads temp
+RUN mkdir -p logs downloads temp data
 
 # Make start script executable
 RUN chmod +x start.sh
