@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import sys
+import signal
 from pathlib import Path
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
@@ -284,8 +285,21 @@ async def on_startup():
 async def on_shutdown():
     """Shutdown tasks"""
     logger.info("Shutting down bot...")
-    await bot.session.close()
-    await engine.dispose()
+    try:
+        # Close bot session gracefully
+        if hasattr(bot, 'session') and bot.session:
+            await bot.session.close()
+        
+        # Dispose database connections
+        if engine:
+            await engine.dispose()
+            
+        logger.info("Bot shutdown completed successfully")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {e}")
+    
+    # Small delay to ensure cleanup completes
+    await asyncio.sleep(0.5)
 
 
 async def main():
@@ -294,14 +308,25 @@ async def main():
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
     
+    # Setup signal handlers for graceful shutdown
+    def signal_handler(signum, frame):
+        logger.info(f"Received signal {signum}, shutting down...")
+        raise KeyboardInterrupt()
+    
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
     # Start polling
     try:
         logger.info("Starting polling...")
         await dp.start_polling(bot)
     except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+        logger.info("Bot stopped by user or signal")
     except Exception as e:
         logger.error(f"Error occurred: {e}")
+    finally:
+        logger.info("Performing final cleanup...")
+        await on_shutdown()
 
 
 if __name__ == "__main__":

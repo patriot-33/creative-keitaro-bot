@@ -94,6 +94,65 @@ except Exception as e:
     fi
 }
 
+# Function to cleanup previous bot instances
+cleanup_previous_instances() {
+    echo "🧹 Cleaning up previous bot instances..."
+    
+    # Kill any remaining Python processes that might be running the bot
+    pkill -f "python.*src.bot.main" || true
+    pkill -f "python.*main.py" || true
+    
+    # Wait a moment for processes to terminate
+    sleep 2
+    
+    # Force kill if still running
+    pkill -9 -f "python.*src.bot.main" || true
+    pkill -9 -f "python.*main.py" || true
+    
+    echo "✅ Previous instances cleaned up"
+}
+
+# Function to reset Telegram webhook
+reset_telegram_webhook() {
+    echo "🔄 Resetting Telegram webhook to ensure clean start..."
+    
+    python3 -c "
+import asyncio
+import aiohttp
+import os
+import sys
+from pathlib import Path
+
+# Add project root to Python path
+project_root = Path(__file__).parent.resolve()
+sys.path.insert(0, str(project_root / 'src'))
+
+async def reset_webhook():
+    token = os.getenv('TELEGRAM_BOT_TOKEN')
+    if not token:
+        print('⚠️  No TELEGRAM_BOT_TOKEN found, skipping webhook reset')
+        return
+    
+    url = f'https://api.telegram.org/bot{token}/deleteWebhook'
+    try:
+        connector = aiohttp.TCPConnector(enable_cleanup_closed=True)
+        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.post(url, json={'drop_pending_updates': True}) as resp:
+                if resp.status == 200:
+                    print('✅ Telegram webhook reset successfully')
+                else:
+                    print(f'⚠️  Webhook reset returned status: {resp.status}')
+    except Exception as e:
+        print(f'⚠️  Failed to reset webhook: {e}')
+    
+    # Small delay to ensure webhook is fully reset
+    await asyncio.sleep(1)
+
+if __name__ == '__main__':
+    asyncio.run(reset_webhook())
+" || true
+}
+
 # Function to start the health check server
 start_health_server() {
     echo "🏥 Starting health check server..."
@@ -144,6 +203,12 @@ if __name__ == '__main__':
 
 # Main execution flow
 main() {
+    # Clean up any previous instances first
+    cleanup_previous_instances
+    
+    # Reset Telegram webhook to avoid conflicts
+    reset_telegram_webhook
+    
     # Wait for PostgreSQL
     wait_for_postgres
     
