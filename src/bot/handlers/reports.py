@@ -19,7 +19,17 @@ from core.config import settings
 from core.enums import ReportPeriod
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Log module loading
+logger.info("="*60)
+logger.info("REPORTS MODULE LOADED")
+logger.info("="*60)
+
 router = Router()
+
+# Log router creation
+logger.info("Reports router created and ready for registration")
 
 # Состояния для FSM
 class ReportsStates(StatesGroup):
@@ -33,28 +43,34 @@ class ReportsStates(StatesGroup):
 @router.message(Command("reports"))
 async def cmd_reports(message: Message, state: FSMContext):
     """Команда для входа в систему отчетов"""
-    # CRITICAL DEBUG: Log command entry
-    logger.error(f"🚀 /reports command received from user {message.from_user.id}")
+    logger.warning(f"====== /REPORTS HANDLER TRIGGERED ======")
+    logger.warning(f"User ID: {message.from_user.id}")
+    logger.warning(f"Username: {message.from_user.username}")
+    logger.warning(f"Message text: '{message.text}'")
+    logger.warning(f"Chat ID: {message.chat.id}")
     
     user = message.from_user
     
     # Проверка доступа
     allowed_users = settings.allowed_users
-    logger.error(f"🔄 Getting allowed users from settings...")
-    logger.error(f"✅ Settings.allowed_users: {allowed_users}")
+    logger.info(f"Getting allowed users from settings...")
+    logger.info(f"Allowed users keys: {list(allowed_users.keys())}")
     
     user_info = allowed_users.get(user.id) or allowed_users.get(str(user.id))
-    logger.error(f"🔄 User {user.id} access check result: {user_info}")
     
     logger.info(f"Reports access check for user {user.id}: user_info={user_info}")
     
     if not user_info:
+        logger.warning(f"Access denied for user {user.id}")
         await message.answer("❌ У вас нет доступа к отчетам.")
         return
+    
+    logger.info(f"Access granted for user {user.id}, role: {user_info.get('role', 'unknown')}")
     
     await state.set_state(ReportsStates.main_menu)
     
     keyboard = ReportsKeyboards.main_reports_menu()
+    logger.info("Reports menu keyboard created")
     
     welcome_text = f"""
 📊 <b>Система отчетов</b>
@@ -71,6 +87,7 @@ async def cmd_reports(message: Message, state: FSMContext):
     
     await message.answer(welcome_text, reply_markup=keyboard, parse_mode="HTML")
     logger.info(f"User {user.id} opened reports system")
+    logger.warning(f"====== /REPORTS HANDLER COMPLETED SUCCESSFULLY ======")
 
 
 # ===== ГЛАВНОЕ МЕНЮ ОТЧЕТОВ =====

@@ -3,10 +3,11 @@ import logging
 import sys
 import signal
 from pathlib import Path
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, Update
 from aiogram.fsm.storage.memory import MemoryStorage
+from typing import Callable, Dict, Any, Awaitable
 
 # Add project root to Python path for imports
 project_root = Path(__file__).parent.parent
@@ -17,29 +18,87 @@ from db.database import engine
 from db.models import Base
 from bot.handlers import reports, admin, upload, google_auth
 
-# Configure logging - EMERGENCY: Set to ERROR level for reports debugging
+# Configure logging with enterprise-level setup
+import os
+
 logging.basicConfig(
-    level=logging.ERROR,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(funcName)s() - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.StreamHandler(sys.stderr)
+    ]
 )
+
+# Set specific loggers to appropriate levels
+logging.getLogger('aiogram').setLevel(logging.INFO)
+logging.getLogger('aiohttp').setLevel(logging.WARNING)
+logging.getLogger('asyncio').setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Log startup info
+logger.info("="*80)
+logger.info("BOT STARTUP: main.py loaded")
+logger.info(f"Python version: {sys.version}")
+logger.info(f"Working directory: {os.getcwd()}")
+logger.info("="*80)
 
 # Initialize bot and dispatcher
 bot = Bot(token=settings.telegram_bot_token)
 dp = Dispatcher(storage=MemoryStorage())
 
-# Register routers
+
+class LoggingMiddleware(BaseMiddleware):
+    """Enterprise logging middleware"""
+    
+    async def __call__(
+        self,
+        handler: Callable[[Update, Dict[str, Any]], Awaitable[Any]],
+        event: Update,
+        data: Dict[str, Any]
+    ) -> Any:
+        # Log all incoming updates
+        if event.message:
+            msg = event.message
+            logger.info(f"INCOMING MESSAGE: user_id={msg.from_user.id}, "
+                       f"username={msg.from_user.username}, "
+                       f"text='{msg.text}', "
+                       f"chat_id={msg.chat.id}, "
+                       f"message_id={msg.message_id}")
+            
+            # Special logging for commands
+            if msg.text and msg.text.startswith('/'):
+                logger.warning(f"COMMAND RECEIVED: '{msg.text}' from user {msg.from_user.id}")
+        
+        elif event.callback_query:
+            cb = event.callback_query
+            logger.info(f"CALLBACK QUERY: user_id={cb.from_user.id}, "
+                       f"data='{cb.data}', "
+                       f"message_id={cb.message.message_id if cb.message else 'inline'}")
+        
+        # Continue processing
+        return await handler(event, data)
+
+
+# Register middleware
+logger.info("Registering logging middleware...")
+dp.update.middleware(LoggingMiddleware())
+logger.info("Logging middleware registered")
+
+# Register routers with detailed logging
+logger.info("Registering routers...")
+logger.info("  - Registering reports router")
 dp.include_router(reports.router)
+logger.info("  - Registering admin router")
 dp.include_router(admin.router)
+logger.info("  - Registering upload router")
 dp.include_router(upload.router)
+logger.info("  - Registering google_auth router")
 dp.include_router(google_auth.router)
+logger.info("All routers registered successfully")
 
-
-# EMERGENCY DEBUG: Log all incoming messages
-@dp.message()
-async def log_all_messages(message: Message):
-    """Log all incoming messages for debugging"""
-    logger.error(f"🚨 EMERGENCY DEBUG: Message received - command: {message.text}, user: {message.from_user.id}")
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
