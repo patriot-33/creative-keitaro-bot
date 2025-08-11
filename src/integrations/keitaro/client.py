@@ -962,6 +962,10 @@ class KeitaroClient:
             # Get main report data (accurate metrics)
             data = await self._make_request('/admin_api/v1/report/build', method='POST', json=main_report_params)
             
+            logger.error(f"🔍 DEBUG: API response received - type: {type(data)}")
+            logger.error(f"🔍 DEBUG: API response keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
+            logger.error(f"🔍 DEBUG: Full API response: {data}")
+            
             if not data or 'rows' not in data:
                 logger.warning("No creatives data received from main API")
                 logger.warning(f"Main API response: {data}")
