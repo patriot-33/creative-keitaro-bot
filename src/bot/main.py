@@ -17,9 +17,9 @@ from db.database import engine
 from db.models import Base
 from bot.handlers import reports, admin, upload, google_auth
 
-# Configure logging
+# Configure logging - EMERGENCY: Set to ERROR level for reports debugging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.ERROR,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -34,6 +34,12 @@ dp.include_router(admin.router)
 dp.include_router(upload.router)
 dp.include_router(google_auth.router)
 
+
+# EMERGENCY DEBUG: Log all incoming messages
+@dp.message()
+async def log_all_messages(message: Message):
+    """Log all incoming messages for debugging"""
+    logger.error(f"🚨 EMERGENCY DEBUG: Message received - command: {message.text}, user: {message.from_user.id}")
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
