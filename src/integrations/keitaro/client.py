@@ -1179,10 +1179,10 @@ class KeitaroClient:
                 
             logger.info(f"Processed geo data for {len(creative_countries)} creatives")
             
-            # FOURTH REQUEST: Get accurate leads count using conversions log (for validation)
+            # FOURTH REQUEST: Get accurate leads count using conversions log (for validation) + geo data
             conversions_params = {
                 "limit": 10000,
-                "columns": ["sub_id_4", "sub_id_1", "status"],
+                "columns": ["sub_id_4", "sub_id_1", "status", "country"],
                 "filters": [
                     {
                         "name": "postback_datetime",
@@ -1277,6 +1277,42 @@ class KeitaroClient:
                     logger.warning("tr32 NOT FOUND in conversions log leads")
                 
                 logger.info(f"=== TR32 DIAGNOSTICS END ===")
+                
+                # ОБРАБОТКА ГЕО ДАННЫХ ИЗ КОНВЕРСИЙ
+                # Переопределяем creative_countries на основе конверсий вместо кликов
+                creative_countries_from_conversions = {}
+                for row in rows:
+                    creative_id = row.get('sub_id_4', 'unknown')
+                    if (creative_id == 'unknown' or not creative_id or 
+                        creative_id in ['{sub_id_4}', 'null', '', ' '] or
+                        str(creative_id).strip() == ''):
+                        continue
+                    
+                    # Берем только конверсии (lead, sale), не все записи
+                    status = row.get('status', '')
+                    if status not in ['lead', 'sale']:
+                        continue
+                        
+                    country = row.get('country', 'unknown')
+                    if country and country != 'unknown':
+                        if creative_id not in creative_countries_from_conversions:
+                            creative_countries_from_conversions[creative_id] = set()
+                        creative_countries_from_conversions[creative_id].add(country)
+                        
+                        # Log tr32 conversion countries
+                        if creative_id == 'tr32':
+                            logger.info(f"tr32 conversion country: {country} (status: {status})")
+                
+                # Используем гео данные из конверсий вместо кликов
+                logger.info(f"GEO FROM CONVERSIONS: {len(creative_countries_from_conversions)} creatives have conversion geo data")
+                if creative_countries_from_conversions:
+                    creative_countries = creative_countries_from_conversions
+                    logger.info("✅ Using geo data from CONVERSIONS instead of clicks")
+                    for creative_id, countries in creative_countries.items():
+                        if creative_id == 'tr32':
+                            logger.info(f"tr32 FINAL geo from conversions: {countries}")
+                else:
+                    logger.info("⚠️ No geo data from conversions, falling back to clicks data")
             else:
                 logger.warning("No conversions log data received")
             
