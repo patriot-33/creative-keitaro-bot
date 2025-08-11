@@ -312,8 +312,22 @@ async def force_bot_takeover():
                 result = await resp.json()
                 logger.info(f'  Dummy webhook set result: {result}')
             
-            logger.info('🔥 Waiting 15 seconds for other instances to fail completely...')
-            await asyncio.sleep(15)  # Longer wait for other instances to fail
+            logger.info('🔥 Step 4.5: Multiple getUpdates calls to force other instances to fail')
+            for attempt in range(20):  # 20 attempts to exhaust other instances
+                try:
+                    async with session.post(f'{base_url}/getUpdates', json={'offset': -1, 'limit': 1, 'timeout': 1}) as resp:
+                        result = await resp.json()
+                        if result.get('ok'):
+                            logger.info(f'  Force getUpdates attempt {attempt+1}/20: success')
+                        else:
+                            logger.info(f'  Force getUpdates attempt {attempt+1}/20: {result}')
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    logger.info(f'  Force getUpdates attempt {attempt+1}/20 failed: {e}')
+                    await asyncio.sleep(0.5)
+            
+            logger.info('🔥 Waiting 30 seconds for other instances to fail completely...')
+            await asyncio.sleep(30)  # Longer wait for other instances to fail
             
             logger.info('🔥 Step 5: Remove dummy webhook and prepare for polling')
             async with session.post(f'{base_url}/deleteWebhook', json={'drop_pending_updates': True}) as resp:
@@ -331,13 +345,24 @@ async def on_startup():
     """Startup tasks"""
     logger.info("Starting bot...")
     
+    # Log deployment info for debugging multiple instances
+    import os
+    service_id = os.getenv('RENDER_SERVICE_ID', 'unknown')
+    deploy_id = os.getenv('RENDER_DEPLOY_ID', 'unknown') 
+    service_name = os.getenv('RENDER_SERVICE_NAME', 'unknown')
+    logger.info(f"🔍 DEPLOYMENT INFO:")
+    logger.info(f"  Service ID: {service_id}")
+    logger.info(f"  Deploy ID: {deploy_id}")
+    logger.info(f"  Service Name: {service_name}")
+    logger.info(f"  Instance: {service_id}-{deploy_id}")
+    
     # EMERGENCY: Force bot takeover to resolve TelegramConflictError
     logger.info("🚨 EMERGENCY MODE: Performing aggressive bot takeover")
     await force_bot_takeover()
     
     # Give Telegram API time to process the takeover
-    logger.info("⏳ Waiting 15 seconds for Telegram API to process takeover...")
-    await asyncio.sleep(15)
+    logger.info("⏳ Waiting 10 seconds for Telegram API to process takeover...")
+    await asyncio.sleep(10)
     
     # Load users from database
     await load_users_from_database()
