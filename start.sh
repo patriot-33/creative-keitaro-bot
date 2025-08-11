@@ -7,6 +7,13 @@ echo "🚀 Starting Creative Keitaro Bot..."
 echo "Environment: ${APP_ENV:-production}"
 echo "Service ID: ${RENDER_SERVICE_ID:-local}"
 echo "Deploy ID: ${RENDER_DEPLOY_ID:-local}"
+echo "Service Name: ${RENDER_SERVICE_NAME:-unknown}"
+echo "Bot Token (last 8 chars): ...${TELEGRAM_BOT_TOKEN: -8}"
+
+# Check for force takeover mode
+if [ "$FORCE_BOT_TAKEOVER" = "true" ]; then
+    echo "⚠️  FORCE_BOT_TAKEOVER mode enabled - will aggressively claim bot"
+fi
 
 # Function to check if PostgreSQL is ready
 wait_for_postgres() {
@@ -225,6 +232,77 @@ asyncio.run(check_instances())
 " || true
 }
 
+# Function to aggressively claim bot (force takeover)
+force_bot_takeover() {
+    echo "💪 Attempting aggressive bot takeover..."
+    
+    python3 -c "
+import asyncio
+import aiohttp
+import os
+
+async def force_takeover():
+    token = os.getenv('TELEGRAM_BOT_TOKEN')
+    if not token:
+        print('⚠️  No TELEGRAM_BOT_TOKEN found')
+        return False
+    
+    base_url = f'https://api.telegram.org/bot{token}'
+    
+    try:
+        connector = aiohttp.TCPConnector(enable_cleanup_closed=True)
+        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=20)) as session:
+            
+            print('🔥 Step 1: Force delete webhook with max drop_pending_updates')
+            async with session.post(f'{base_url}/deleteWebhook', json={'drop_pending_updates': True}) as resp:
+                result = await resp.json()
+                print(f'  Result: {result}')
+                
+            await asyncio.sleep(3)
+            
+            print('🔥 Step 2: Aggressive getUpdates with high offset to skip all')
+            async with session.post(f'{base_url}/getUpdates', json={'offset': 999999999, 'limit': 1, 'timeout': 0}) as resp:
+                result = await resp.json()
+                print(f'  Result: {result}')
+                
+            await asyncio.sleep(2)
+            
+            print('🔥 Step 3: Multiple rapid getUpdates to exhaust the queue')
+            for i in range(10):
+                print(f'    Rapid getUpdates #{i+1}...')
+                async with session.post(f'{base_url}/getUpdates', json={'offset': -1, 'limit': 100, 'timeout': 0}) as resp:
+                    result = await resp.json()
+                    updates_count = len(result.get('result', []))
+                    print(f'      Got {updates_count} updates')
+                    if updates_count == 0:
+                        break
+                await asyncio.sleep(0.1)
+            
+            print('🔥 Step 4: Set webhook to dummy URL to block other instances')
+            dummy_url = 'https://httpbin.org/status/200'  # Safe dummy webhook
+            async with session.post(f'{base_url}/setWebhook', json={'url': dummy_url, 'drop_pending_updates': True}) as resp:
+                result = await resp.json()
+                print(f'  Dummy webhook set: {result}')
+            
+            await asyncio.sleep(3)
+            
+            print('🔥 Step 5: Remove dummy webhook and go to polling')
+            async with session.post(f'{base_url}/deleteWebhook', json={'drop_pending_updates': True}) as resp:
+                result = await resp.json()
+                print(f'  Dummy webhook removed: {result}')
+            
+            print('✅ Bot takeover completed')
+            return True
+            
+    except Exception as e:
+        print(f'❌ Bot takeover failed: {e}')
+        return False
+
+success = asyncio.run(force_takeover())
+exit(0 if success else 1)
+" || echo "⚠️  Force takeover had issues but continuing..."
+}
+
 # Function to reset Telegram webhook
 reset_telegram_webhook() {
     echo "🔄 Resetting Telegram webhook to ensure clean start..."
@@ -365,7 +443,11 @@ main() {
     cleanup_previous_instances
     
     # Step 3: Reset Telegram webhook to avoid conflicts
-    reset_telegram_webhook
+    if [ "$FORCE_BOT_TAKEOVER" = "true" ]; then
+        force_bot_takeover
+    else
+        reset_telegram_webhook
+    fi
     
     # Step 4: Give Telegram API extra time to process webhook reset
     echo "⏳ Waiting for Telegram API to process webhook reset..."
