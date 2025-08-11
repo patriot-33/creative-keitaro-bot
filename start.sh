@@ -5,6 +5,8 @@ set -e
 
 echo "🚀 Starting Creative Keitaro Bot..."
 echo "Environment: ${APP_ENV:-production}"
+echo "Service ID: ${RENDER_SERVICE_ID:-local}"
+echo "Deploy ID: ${RENDER_DEPLOY_ID:-local}"
 
 # Function to check if PostgreSQL is ready
 wait_for_postgres() {
@@ -150,6 +152,79 @@ cleanup_previous_instances() {
     echo "✅ Previous instances cleaned up"
 }
 
+# Function to check if this is a duplicate service
+check_duplicate_service() {
+    echo "🔍 Checking for duplicate services..."
+    
+    # Check if we have service info
+    if [ -n "$RENDER_SERVICE_ID" ]; then
+        echo "This deployment:"
+        echo "  Service ID: $RENDER_SERVICE_ID" 
+        echo "  Deploy ID: ${RENDER_DEPLOY_ID:-unknown}"
+        echo "  Service Name: ${RENDER_SERVICE_NAME:-unknown}"
+        
+        # Add a unique identifier to prevent conflicts
+        export BOT_INSTANCE_ID="${RENDER_SERVICE_ID}-${RENDER_DEPLOY_ID:-$(date +%s)}"
+        echo "  Bot Instance ID: $BOT_INSTANCE_ID"
+    else
+        export BOT_INSTANCE_ID="local-$(date +%s)"
+        echo "  Bot Instance ID: $BOT_INSTANCE_ID (local)"
+    fi
+}
+
+# Function to check for running bot instances via Telegram API
+check_bot_instances() {
+    echo "🕵️ Checking for other bot instances via Telegram API..."
+    
+    python3 -c "
+import asyncio
+import aiohttp
+import os
+
+async def check_instances():
+    token = os.getenv('TELEGRAM_BOT_TOKEN')
+    if not token:
+        print('⚠️  No TELEGRAM_BOT_TOKEN found')
+        return
+    
+    base_url = f'https://api.telegram.org/bot{token}'
+    
+    try:
+        connector = aiohttp.TCPConnector(enable_cleanup_closed=True)
+        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as session:
+            
+            # Check webhook info
+            print('📍 Checking current webhook status...')
+            async with session.get(f'{base_url}/getWebhookInfo') as resp:
+                if resp.status == 200:
+                    webhook_info = await resp.json()
+                    result = webhook_info.get('result', {})
+                    webhook_url = result.get('url', '')
+                    pending_updates = result.get('pending_update_count', 0)
+                    last_error = result.get('last_error_message', '')
+                    print(f'  Webhook URL: {webhook_url or \"(none)\"}')
+                    print(f'  Pending updates: {pending_updates}')
+                    if last_error:
+                        print(f'  Last error: {last_error}')
+                else:
+                    print(f'❌ Failed to get webhook info: {resp.status}')
+            
+            # Get bot info
+            print('🤖 Checking bot information...')
+            async with session.get(f'{base_url}/getMe') as resp:
+                if resp.status == 200:
+                    bot_info = await resp.json()
+                    result = bot_info.get('result', {})
+                    print(f'  Bot: @{result.get(\"username\", \"unknown\")} (ID: {result.get(\"id\", \"unknown\")})')
+                    print(f'  Name: {result.get(\"first_name\", \"unknown\")}')
+                
+    except Exception as e:
+        print(f'❌ Failed to check bot instances: {e}')
+
+asyncio.run(check_instances())
+" || true
+}
+
 # Function to reset Telegram webhook
 reset_telegram_webhook() {
     echo "🔄 Resetting Telegram webhook to ensure clean start..."
@@ -186,17 +261,23 @@ async def reset_webhook():
             # Wait a moment
             await asyncio.sleep(2)
             
-            # Step 2: Use getUpdates to clear any remaining updates
+            # Step 2: Use getUpdates to clear any remaining updates (multiple attempts)
             print('🧹 Clearing remaining updates with getUpdates...')
-            async with session.post(f'{base_url}/getUpdates', json={'offset': -1, 'limit': 1, 'timeout': 0}) as resp:
-                result2 = await resp.json()
-                if resp.status == 200:
-                    print(f'✅ GetUpdates cleared: got {len(result2.get(\"result\", []))} updates')
-                else:
-                    print(f'⚠️  GetUpdates failed: {result2}')
+            for attempt in range(3):
+                print(f'  Attempt {attempt + 1}/3...')
+                async with session.post(f'{base_url}/getUpdates', json={'offset': -1, 'limit': 1, 'timeout': 0}) as resp:
+                    result2 = await resp.json()
+                    if resp.status == 200:
+                        updates_count = len(result2.get('result', []))
+                        print(f'  ✅ GetUpdates cleared: got {updates_count} updates')
+                        if updates_count == 0:
+                            break
+                    else:
+                        print(f'  ⚠️  GetUpdates failed: {result2}')
+                await asyncio.sleep(0.5)
             
             # Wait another moment
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
             
             # Step 3: Set webhook to empty (extra cleanup)
             print('🧹 Final webhook cleanup...')
@@ -274,15 +355,26 @@ if __name__ == '__main__':
 
 # Main execution flow
 main() {
-    # Clean up any previous instances first
+    # Step 0: Check for duplicate services
+    check_duplicate_service
+    
+    # Step 1: Check what's currently running
+    check_bot_instances
+    
+    # Step 2: Clean up any previous instances first
     cleanup_previous_instances
     
-    # Reset Telegram webhook to avoid conflicts
+    # Step 3: Reset Telegram webhook to avoid conflicts
     reset_telegram_webhook
     
-    # Give Telegram API extra time to process webhook reset
+    # Step 4: Give Telegram API extra time to process webhook reset
     echo "⏳ Waiting for Telegram API to process webhook reset..."
-    sleep 5
+    echo "  This may take up to 10 seconds for Telegram to fully process..."
+    sleep 10
+    
+    # Step 5: Final check before starting
+    echo "🔍 Final check before starting bot..."
+    check_bot_instances
     
     # Wait for PostgreSQL
     wait_for_postgres
