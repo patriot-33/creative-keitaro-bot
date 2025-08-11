@@ -960,18 +960,63 @@ class KeitaroClient:
             logger.info(f"Main report API params: {main_report_params}")
             
             # Get main report data (accurate metrics)
+            logger.error("🚨 CRITICAL: About to make main API request...")
             data = await self._make_request('/admin_api/v1/report/build', method='POST', json=main_report_params)
+            logger.error("🚨 CRITICAL: Main API request completed")
             
-            logger.error(f"🔍 DEBUG: API response received - type: {type(data)}")
-            logger.error(f"🔍 DEBUG: API response keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
-            logger.error(f"🔍 DEBUG: Full API response: {data}")
+            logger.error(f"🔍 MAIN API DEBUG: Response received - type: {type(data)}")
+            logger.error(f"🔍 MAIN API DEBUG: Response is None: {data is None}")
+            logger.error(f"🔍 MAIN API DEBUG: Response is dict: {isinstance(data, dict)}")
             
-            if not data or 'rows' not in data:
-                logger.warning("No creatives data received from main API")
-                logger.warning(f"Main API response: {data}")
+            if isinstance(data, dict):
+                logger.error(f"🔍 MAIN API DEBUG: Dict keys: {list(data.keys())}")
+                logger.error(f"🔍 MAIN API DEBUG: Has 'rows' key: {'rows' in data}")
+                if 'rows' in data:
+                    logger.error(f"🔍 MAIN API DEBUG: Rows length: {len(data['rows'])}")
+                    if len(data['rows']) > 0:
+                        logger.error(f"🔍 MAIN API DEBUG: First row sample: {data['rows'][0]}")
+                else:
+                    logger.error(f"🔍 MAIN API DEBUG: Available keys instead of 'rows': {list(data.keys())}")
+                    logger.error(f"🔍 MAIN API DEBUG: Full response content: {data}")
+            else:
+                logger.error(f"🔍 MAIN API DEBUG: Non-dict response: {data}")
+            
+            # CRITICAL FIX: Handle different API response formats
+            if not data:
+                logger.error("🚨 CRITICAL: API returned None or empty response")
                 return []
             
-            logger.info(f"Main API returned {len(data.get('rows', []))} raw rows")
+            # Try different possible response formats
+            rows_data = None
+            if isinstance(data, dict):
+                if 'rows' in data:
+                    rows_data = data['rows']
+                    logger.error(f"✅ Found 'rows' key with {len(rows_data)} items")
+                elif 'data' in data:
+                    rows_data = data['data']
+                    logger.error(f"✅ Found 'data' key instead of 'rows' with {len(rows_data)} items")
+                elif 'result' in data:
+                    rows_data = data['result']
+                    logger.error(f"✅ Found 'result' key instead of 'rows' with {len(rows_data)} items")
+                elif isinstance(data, list):
+                    rows_data = data
+                    logger.error(f"✅ Response is a direct list with {len(rows_data)} items")
+                else:
+                    logger.error(f"🚨 CRITICAL: Unknown response format. Keys: {list(data.keys())}")
+                    return []
+            elif isinstance(data, list):
+                rows_data = data
+                logger.error(f"✅ Response is a direct list with {len(rows_data)} items")
+            else:
+                logger.error(f"🚨 CRITICAL: Unexpected data type: {type(data)}")
+                return []
+                
+            if not rows_data:
+                logger.error("🚨 CRITICAL: No data found in any expected format")
+                logger.error(f"Full response for analysis: {data}")
+                return []
+            
+            logger.error(f"✅ MAIN API SUCCESS: Using data with {len(rows_data)} rows for processing")
             
             # SECOND REQUEST: Get active days data (with datetime grouping)
             # Note: Some rows have empty sub_id_4, so we need to be more flexible
@@ -1415,7 +1460,8 @@ class KeitaroClient:
             skipped_rows = 0
             tr32_rows_count = 0
             
-            for row in data['rows']:
+            logger.error(f"🔄 PROCESSING: Starting to process {len(rows_data)} main data rows...")
+            for row in rows_data:
                 creative_id = row.get('sub_id_4', 'unknown')
                 # Skip rows with empty, null, or placeholder creative IDs
                 if (creative_id == 'unknown' or not creative_id or 
