@@ -1095,3 +1095,125 @@ def upgrade() -> None:
 - **Performance**: Direct API calls вместо inefficient workarounds
 
 ---
+
+## Баг #7: FB Dashboard показывает неверные данные за "сегодня"
+
+### Проблема:
+**Дата**: 2025-08-11  
+**Симптомы**: 
+- FB Dashboard отображал подозрительные результаты для периода "сегодня"
+- Показывал только одного "байера" `traffic_filtered` вместо реальных байеров
+- Данные: 51,795 кликов, 7,335 регистраций, доход $48,375.00
+- Ожидалось: ТОП-5 реальных байеров по доходу (deposit payments)
+
+### Анализ причин:
+**Первичная проблема**: Dashboard создавал виртуального "байера" из агрегированных данных  
+**Вторичная проблема**: Неправильная конвертация временных зон во всех функциях обработки дат
+
+### Техническое исследование:
+
+#### Проблема #1: Виртуальный байер
+**Файл**: `src/bot/services/reports.py`
+```python
+# БЫЛО (неправильно):
+def get_dashboard_summary():
+    # Получаем данные по источникам трафика
+    traffic_data = await keitaro.get_stats_by_traffic_sources(...)
+    # Создаем виртуального "байера" из агрегации
+    buyers_data = self._convert_traffic_data_to_buyers_format(traffic_data)
+    # Результат: [{"buyer_id": "traffic_filtered", "revenue": 48375, ...}]
+
+# СТАЛО (правильно):
+def get_dashboard_summary():
+    # Получаем данные по реальным байерам с фильтрацией трафика
+    buyers_data = await keitaro.get_buyers_by_traffic_source(
+        period=period_enum,
+        traffic_source_ids=traffic_source_ids
+    )
+    # Результат: [{"buyer_id": "n1", "revenue": 1025}, {"buyer_id": "v1", "revenue": 890}, ...]
+```
+
+#### Проблема #2: Неправильная конвертация UTC
+**Файлы**: `src/integrations/keitaro/client.py` - все функции с параметром `period`
+
+**Корневая причина**: Все функции отправляли московское время в API, который ожидает UTC
+```python
+# БЫЛО (неправильно):
+if period == ReportPeriod.TODAY:
+    date = datetime.now()
+    start_date = date.strftime('%Y-%m-%d 00:00:00')  # Москва как UTC
+    end_date = date.strftime('%Y-%m-%d 23:59:59')    # Москва как UTC
+
+# СТАЛО (правильно, по паттерну из BUGFIXES.md):
+if period == ReportPeriod.TODAY:
+    date = datetime.now()
+    # Moscow day boundaries (00:00-23:59) converted to UTC (21:00-20:59)
+    moscow_start = date.strftime('%Y-%m-%d 00:00:00')
+    moscow_end = date.strftime('%Y-%m-%d 23:59:59')
+    # Convert to UTC by subtracting 3 hours
+    moscow_start_dt = datetime.strptime(moscow_start, '%Y-%m-%d %H:%M:%S')
+    moscow_end_dt = datetime.strptime(moscow_end, '%Y-%m-%d %H:%M:%S')
+    utc_start_dt = moscow_start_dt - timedelta(hours=3)  # UTC = Moscow - 3
+    utc_end_dt = moscow_end_dt - timedelta(hours=3)
+    start_date = utc_start_dt.strftime('%Y-%m-%d %H:%M:%S')
+    end_date = utc_end_dt.strftime('%Y-%m-%d %H:%M:%S')
+```
+
+### Исправленные функции:
+
+**В `src/integrations/keitaro/client.py`:**
+1. ✅ `get_stats_by_buyers()` - Полная UTC конвертация для всех периодов
+2. ✅ `get_buyers_by_traffic_source()` - Добавлена UTC конвертация для LAST_3D, LAST_7D, LAST_30D
+3. ✅ `get_stats_by_traffic_sources()` - Полная UTC конвертация для всех периодов  
+4. ✅ `get_stats_by_creatives()` - Полная UTC конвертация для всех периодов
+5. ✅ `get_creatives_report()` - Полная UTC конвертация для всех периодов
+
+**В `src/bot/services/reports.py`:**
+1. ✅ `get_dashboard_summary()` - Переход на реальных байеров
+
+### Применяемый паттерн UTC конвертации:
+```python
+# Универсальный паттерн для всех периодов (кроме LAST_24H):
+if period == ReportPeriod.TODAY:  # или YESTERDAY, LAST_3D, LAST_7D, LAST_30D
+    # Определяем московские границы
+    moscow_start = date.strftime('%Y-%m-%d 00:00:00')
+    moscow_end = date.strftime('%Y-%m-%d 23:59:59')
+    
+    # Конвертируем в UTC (Москва - 3 часа)
+    moscow_start_dt = datetime.strptime(moscow_start, '%Y-%m-%d %H:%M:%S')
+    moscow_end_dt = datetime.strptime(moscow_end, '%Y-%m-%d %H:%M:%S')
+    utc_start_dt = moscow_start_dt - timedelta(hours=3)
+    utc_end_dt = moscow_end_dt - timedelta(hours=3)
+    start_date = utc_start_dt.strftime('%Y-%m-%d %H:%M:%S')
+    end_date = utc_end_dt.strftime('%Y-%m-%d %H:%M:%S')
+
+# Исключение: LAST_24H остается относительным временем
+if period == ReportPeriod.LAST_24H:
+    start_date = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
+    end_date = now.strftime('%Y-%m-%d %H:%M:%S')
+```
+
+### Результаты исправления:
+✅ **Dashboard теперь показывает**:
+- Реальных ТОП-5 байеров по доходу (deposits)
+- Корректные данные для всех временных периодов
+- Правильную фильтрацию FB трафика (все источники кроме Google ID=2)
+
+✅ **Все функции API**:
+- Правильно конвертируют московское время в UTC  
+- Используют `postback_datetime` для подсчета конверсий по дате совершения
+- Совместимы с требованиями Keitaro API
+
+✅ **Техническое качество**:
+- Устранена дублирующая логика конвертации времени
+- Применен единый паттерн UTC конвертации
+- Добавлены информативные логи для отладки
+- 100% покрытие всех временных периодов
+
+### Статистика изменений:
+- **Функций исправлено**: 6 (5 в client.py + 1 в reports.py)  
+- **Строк кода изменено**: ~280 строк
+- **Периодов времени исправлено**: 5 (TODAY, YESTERDAY, LAST_3D, LAST_7D, LAST_30D)
+- **Архитектурных улучшений**: Переход от виртуальных к реальным данным
+
+---
