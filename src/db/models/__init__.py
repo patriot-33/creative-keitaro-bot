@@ -5,6 +5,7 @@ from .buyer import Buyer
 from .creative import Creative, GeoCounter
 from .audit import AuditLog
 from .digest import DigestSettings
+from .custom_geo import CustomGeo
 
 __all__ = [
     "Base",
@@ -16,4 +17,5 @@ __all__ = [
     "GeoCounter",
     "AuditLog",
     "DigestSettings",
+    "CustomGeo",
 ]

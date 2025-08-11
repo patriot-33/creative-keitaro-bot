@@ -17,6 +17,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
 from core.config import settings
+from bot.services.custom_geos import CustomGeosService
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -28,53 +29,35 @@ class UploadStates(StatesGroup):
     waiting_file = State()
     waiting_notes = State()
 
-def load_custom_geos() -> List[str]:
-    """Загрузка пользовательских ГЕО из файла"""
-    if os.path.exists(CUSTOM_GEOS_FILE):
-        try:
-            with open(CUSTOM_GEOS_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return data.get('custom_geos', [])
-        except Exception as e:
-            logger.error(f"Error loading custom geos: {e}")
-    return []
-
-def save_custom_geos(custom_geos: List[str]) -> bool:
-    """Сохранение пользовательских ГЕО в файл"""
+async def load_custom_geos() -> List[str]:
+    """Загрузка пользовательских ГЕО из базы данных"""
     try:
-        # CRITICAL FIX: Ensure directory exists before creating file
-        os.makedirs(os.path.dirname(CUSTOM_GEOS_FILE), exist_ok=True)
-        logger.error(f"🔧 CUSTOM GEOS: Created/verified directory: {os.path.dirname(CUSTOM_GEOS_FILE)}")
-        
-        data = {'custom_geos': custom_geos}
-        logger.error(f"🔧 CUSTOM GEOS: Saving {len(custom_geos)} geos to {CUSTOM_GEOS_FILE}")
-        logger.error(f"🔧 CUSTOM GEOS: Data to save: {data}")
-        
-        with open(CUSTOM_GEOS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        
-        # Verify the file was created
-        if os.path.exists(CUSTOM_GEOS_FILE):
-            logger.error(f"✅ CUSTOM GEOS: File successfully created at {CUSTOM_GEOS_FILE}")
-            with open(CUSTOM_GEOS_FILE, 'r', encoding='utf-8') as f:
-                saved_data = json.load(f)
-                logger.error(f"✅ CUSTOM GEOS: Verified saved data: {saved_data}")
-        else:
-            logger.error(f"❌ CUSTOM GEOS: File was not created at {CUSTOM_GEOS_FILE}")
-            return False
-            
-        return True
+        custom_geos = await CustomGeosService.get_all_custom_geos()
+        logger.error(f"🔄 CUSTOM GEOS: Loaded {len(custom_geos)} from database: {custom_geos}")
+        return custom_geos
     except Exception as e:
-        logger.error(f"❌ CUSTOM GEOS: Error saving custom geos: {e}")
-        logger.error(f"❌ CUSTOM GEOS: Working directory: {os.getcwd()}")
-        logger.error(f"❌ CUSTOM GEOS: Target file path: {CUSTOM_GEOS_FILE}")
-        logger.error(f"❌ CUSTOM GEOS: Directory exists: {os.path.exists(os.path.dirname(CUSTOM_GEOS_FILE))}")
-        logger.error(f"❌ CUSTOM GEOS: Directory writable: {os.access(os.path.dirname(CUSTOM_GEOS_FILE) if os.path.exists(os.path.dirname(CUSTOM_GEOS_FILE)) else '.', os.W_OK)}")
+        logger.error(f"❌ CUSTOM GEOS: Error loading from database: {e}")
+        return []
+
+async def save_custom_geo(geo_code: str) -> bool:
+    """Сохранение нового пользовательского ГЕО в базу данных"""
+    try:
+        logger.error(f"💾 CUSTOM GEOS DB: Attempting to save geo code: {geo_code}")
+        result = await CustomGeosService.add_custom_geo(geo_code)
+        
+        if result:
+            logger.error(f"✅ CUSTOM GEOS DB: Successfully saved geo code: {geo_code}")
+        else:
+            logger.error(f"❌ CUSTOM GEOS DB: Failed to save geo code: {geo_code}")
+            
+        return result
+    except Exception as e:
+        logger.error(f"❌ CUSTOM GEOS DB: Exception saving geo code {geo_code}: {e}")
         return False
 
-def get_all_geos() -> List[str]:
+async def get_all_geos() -> List[str]:
     """Получение всех доступных ГЕО (стандартные + пользовательские) в алфавитном порядке"""
-    custom_geos = load_custom_geos()
+    custom_geos = await load_custom_geos()
     all_geos = list(set(SUPPORTED_GEOS + custom_geos))  # Убираем дубликаты
     return sorted(all_geos)  # Сортируем по алфавиту
 
@@ -118,7 +101,8 @@ async def cmd_upload(message: Message, state: FSMContext):
     await state.set_state(UploadStates.waiting_geo)
     
     # Получаем все ГЕО в алфавитном порядке
-    all_geos = get_all_geos()
+    all_geos = await get_all_geos()
+    custom_geos = await load_custom_geos()
     keyboard_rows = []
     
     # Разбиваем ГЕО на ряды по 4 кнопки
@@ -126,7 +110,6 @@ async def cmd_upload(message: Message, state: FSMContext):
         row = []
         for geo in all_geos[i:i+4]:
             # Помечаем пользовательские ГЕО звездочкой
-            custom_geos = load_custom_geos()
             if geo in custom_geos:
                 row.append(InlineKeyboardButton(text=f"⭐ {geo}", callback_data=f"geo_{geo}"))
             else:
@@ -165,7 +148,7 @@ async def handle_geo_selection(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора ГЕО"""
     geo = callback.data.replace("geo_", "")
     
-    all_geos = get_all_geos()
+    all_geos = await get_all_geos()
     if geo not in all_geos:
         await callback.answer("❌ Неподдерживаемое ГЕО!", show_alert=True)
         return
@@ -205,13 +188,13 @@ async def handle_change_geo(callback: CallbackQuery, state: FSMContext):
     await state.set_state(UploadStates.waiting_geo)
     
     # Повторно показываем клавиатуру с ГЕО
-    all_geos = get_all_geos()
+    all_geos = await get_all_geos()
+    custom_geos = await load_custom_geos()
     keyboard_rows = []
     
     for i in range(0, len(all_geos), 4):
         row = []
         for geo in all_geos[i:i+4]:
-            custom_geos = load_custom_geos()
             if geo in custom_geos:
                 row.append(InlineKeyboardButton(text=f"⭐ {geo}", callback_data=f"geo_{geo}"))
             else:
@@ -632,7 +615,7 @@ async def handle_custom_geo_input(message: Message, state: FSMContext):
         return
     
     # Проверяем, не существует ли уже такой ГЕО
-    all_geos = get_all_geos()
+    all_geos = await get_all_geos()
     if geo_code in all_geos:
         await message.answer(
             f"⚠️ <b>ГЕО код {geo_code} уже существует!</b>\n\n"
@@ -644,13 +627,7 @@ async def handle_custom_geo_input(message: Message, state: FSMContext):
     # Добавляем новый ГЕО
     logger.error(f"🔧 CUSTOM GEO: User {message.from_user.id} attempting to add new GEO: {geo_code}")
     
-    custom_geos = load_custom_geos()
-    logger.error(f"🔧 CUSTOM GEO: Current custom geos before adding: {custom_geos}")
-    
-    custom_geos.append(geo_code)
-    logger.error(f"🔧 CUSTOM GEO: Custom geos after adding: {custom_geos}")
-    
-    if save_custom_geos(custom_geos):
+    if await save_custom_geo(geo_code):
         # Устанавливаем новый ГЕО как выбранный
         await state.update_data(geo=geo_code)
         await state.set_state(UploadStates.waiting_file)
