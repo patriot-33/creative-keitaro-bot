@@ -312,7 +312,8 @@ async def force_bot_takeover():
                 result = await resp.json()
                 logger.info(f'  Dummy webhook set result: {result}')
             
-            await asyncio.sleep(5)  # Give more time for other instances to fail
+            logger.info('🔥 Waiting 15 seconds for other instances to fail completely...')
+            await asyncio.sleep(15)  # Longer wait for other instances to fail
             
             logger.info('🔥 Step 5: Remove dummy webhook and prepare for polling')
             async with session.post(f'{base_url}/deleteWebhook', json={'drop_pending_updates': True}) as resp:
@@ -335,8 +336,8 @@ async def on_startup():
     await force_bot_takeover()
     
     # Give Telegram API time to process the takeover
-    logger.info("⏳ Waiting 10 seconds for Telegram API to process takeover...")
-    await asyncio.sleep(10)
+    logger.info("⏳ Waiting 15 seconds for Telegram API to process takeover...")
+    await asyncio.sleep(15)
     
     # Load users from database
     await load_users_from_database()
@@ -387,17 +388,38 @@ async def main():
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
     
-    # Start polling
-    try:
-        logger.info("Starting polling...")
-        await dp.start_polling(bot)
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user or signal")
-    except Exception as e:
-        logger.error(f"Error occurred: {e}")
-    finally:
-        logger.info("Performing final cleanup...")
-        await on_shutdown()
+    # Start polling with retry mechanism for TelegramConflictError
+    max_retries = 3
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            logger.info(f"Starting polling... (attempt {retry_count + 1}/{max_retries})")
+            await dp.start_polling(bot)
+            break  # Success - exit retry loop
+        except Exception as e:
+            if "TelegramConflictError" in str(e) or "terminated by other getUpdates request" in str(e):
+                retry_count += 1
+                if retry_count < max_retries:
+                    logger.warning(f"TelegramConflictError detected, performing emergency takeover (retry {retry_count}/{max_retries})")
+                    await force_bot_takeover()
+                    await asyncio.sleep(20)  # Wait longer before retry
+                    continue
+                else:
+                    logger.error("Max retries reached for TelegramConflictError")
+                    raise
+            elif isinstance(e, KeyboardInterrupt):
+                logger.info("Bot stopped by user or signal")
+                break
+            else:
+                logger.error(f"Unexpected error occurred: {e}")
+                raise
+        except KeyboardInterrupt:
+            logger.info("Bot stopped by user or signal")
+            break
+    
+    logger.info("Performing final cleanup...")
+    await on_shutdown()
 
 
 if __name__ == "__main__":
