@@ -33,11 +33,18 @@ class ReportsStates(StatesGroup):
 @router.message(Command("reports"))
 async def cmd_reports(message: Message, state: FSMContext):
     """Команда для входа в систему отчетов"""
+    # CRITICAL DEBUG: Log command entry
+    logger.error(f"🚀 /reports command received from user {message.from_user.id}")
+    
     user = message.from_user
     
     # Проверка доступа
     allowed_users = settings.allowed_users
+    logger.error(f"🔄 Getting allowed users from settings...")
+    logger.error(f"✅ Settings.allowed_users: {allowed_users}")
+    
     user_info = allowed_users.get(user.id) or allowed_users.get(str(user.id))
+    logger.error(f"🔄 User {user.id} access check result: {user_info}")
     
     logger.info(f"Reports access check for user {user.id}: user_info={user_info}")
     
