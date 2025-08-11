@@ -1284,23 +1284,33 @@ class KeitaroClient:
                 logger.info(f"Processing {len(rows)} conversion rows for geo extraction...")
                 creative_countries_from_conversions = {}
                 tr36_all_rows = []
+                creative_id_mapping = {}  # To track case variations
                 
                 for row in rows:
-                    creative_id = row.get('sub_id_4', 'unknown')
+                    creative_id_raw = row.get('sub_id_4', 'unknown')
                     
                     # Собираем все строки TR36 для диагностики (case insensitive)
-                    if str(creative_id).upper() == 'TR36':
+                    if str(creative_id_raw).upper() == 'TR36':
                         tr36_all_rows.append({
-                            'creative_id': creative_id,
+                            'creative_id_raw': creative_id_raw,
+                            'creative_id_upper': str(creative_id_raw).upper(),
                             'status': row.get('status', 'unknown'),
                             'country': row.get('country', 'unknown'),
                             'postback_datetime': row.get('postback_datetime', 'unknown')
                         })
                     
-                    if (creative_id == 'unknown' or not creative_id or 
-                        creative_id in ['{sub_id_4}', 'null', '', ' '] or
-                        str(creative_id).strip() == ''):
+                    if (creative_id_raw == 'unknown' or not creative_id_raw or 
+                        creative_id_raw in ['{sub_id_4}', 'null', '', ' '] or
+                        str(creative_id_raw).strip() == ''):
                         continue
+                    
+                    # Normalize creative_id to handle case variations
+                    creative_id = str(creative_id_raw)
+                    creative_id_upper = creative_id.upper()
+                    
+                    # Map original to normalized for consistency
+                    if creative_id_upper not in creative_id_mapping:
+                        creative_id_mapping[creative_id_upper] = creative_id
                     
                     # Берем только конверсии (lead, sale), не все записи
                     status = row.get('status', '')
@@ -1309,24 +1319,46 @@ class KeitaroClient:
                         
                     country = row.get('country', 'unknown')
                     if country and country != 'unknown':
+                        # Use the original creative_id for consistency with main data
                         if creative_id not in creative_countries_from_conversions:
                             creative_countries_from_conversions[creative_id] = set()
                         creative_countries_from_conversions[creative_id].add(country)
                         
                         # Log tr32 and TR36 conversion countries
-                        if str(creative_id).upper() in ['TR32', 'TR36']:
-                            logger.info(f"{creative_id} conversion country: {country} (status: {status})")
+                        if creative_id_upper in ['TR32', 'TR36']:
+                            logger.info(f"{creative_id} (original) / {creative_id_upper} (normalized) conversion country: {country} (status: {status})")
                 
                 # TR36 диагностика
                 logger.info(f"=== TR36 DIAGNOSTICS START ===")
+                logger.info(f"Creative ID mapping found: {creative_id_mapping}")
                 logger.info(f"TR36 total rows found in conversions: {len(tr36_all_rows)}")
                 if tr36_all_rows:
-                    for row in tr36_all_rows[:5]:  # Показываем первые 5 строк
-                        logger.info(f"TR36 row: {row}")
-                    if 'TR36' in creative_countries_from_conversions:
-                        logger.info(f"TR36 countries from conversions: {creative_countries_from_conversions['TR36']}")
+                    logger.info("TR36 rows found in conversions log:")
+                    for i, row in enumerate(tr36_all_rows[:5]):  # Показываем первые 5 строк
+                        logger.info(f"TR36 row #{i+1}: {row}")
+                    
+                    # Check for TR36 in different case variations
+                    tr36_variations = []
+                    for creative_id, countries in creative_countries_from_conversions.items():
+                        if str(creative_id).upper() == 'TR36':
+                            tr36_variations.append({
+                                'creative_id': creative_id,
+                                'countries': countries
+                            })
+                    
+                    if tr36_variations:
+                        logger.info(f"TR36 case variations found: {tr36_variations}")
+                        for variation in tr36_variations:
+                            logger.info(f"TR36 variant '{variation['creative_id']}' countries: {variation['countries']}")
                     else:
-                        logger.warning("TR36 NOT FOUND in creative_countries_from_conversions")
+                        logger.warning("TR36 NOT FOUND in creative_countries_from_conversions in any case variation")
+                        
+                        # Additional debugging: check what creative IDs we actually have
+                        all_creative_ids = list(creative_countries_from_conversions.keys())
+                        logger.info(f"All creative IDs in conversions geo data: {all_creative_ids}")
+                        tr_ids = [cid for cid in all_creative_ids if 'tr' in str(cid).lower()]
+                        logger.info(f"All TR-related creative IDs: {tr_ids}")
+                        
                 logger.info(f"=== TR36 DIAGNOSTICS END ===")
                 
                 # Используем гео данные из конверсий вместо кликов

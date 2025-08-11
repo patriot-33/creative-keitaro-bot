@@ -98,24 +98,55 @@ except Exception as e:
 cleanup_previous_instances() {
     echo "🧹 Cleaning up previous bot instances..."
     
-    # Try to kill processes using different methods (pkill may not be available in containers)
+    # Method 1: Try pkill if available
     if command -v pkill >/dev/null 2>&1; then
-        # Kill any remaining Python processes that might be running the bot
+        echo "🔍 Using pkill to find and terminate bot processes..."
         pkill -f "python.*src.bot.main" 2>/dev/null || true
         pkill -f "python.*main.py" 2>/dev/null || true
-        
-        # Wait a moment for processes to terminate
+        pkill -f "creative.*bot" 2>/dev/null || true
         sleep 2
-        
         # Force kill if still running
         pkill -9 -f "python.*src.bot.main" 2>/dev/null || true
         pkill -9 -f "python.*main.py" 2>/dev/null || true
-    else
-        # Alternative method using ps and kill
-        ps aux | grep -E "python.*src\.bot\.main|python.*main\.py" | grep -v grep | awk '{print $2}' | xargs -r kill -9 2>/dev/null || true
-        sleep 1
+        pkill -9 -f "creative.*bot" 2>/dev/null || true
     fi
     
+    # Method 2: Use ps and kill (works in most containers)
+    echo "🔍 Using ps/kill to cleanup remaining processes..."
+    if command -v ps >/dev/null 2>&1; then
+        # Find Python processes related to the bot
+        PIDS=$(ps aux 2>/dev/null | grep -E "python.*src\.bot\.main|python.*main\.py|python.*creative.*bot" | grep -v grep | awk '{print $2}' || true)
+        if [ ! -z "$PIDS" ]; then
+            echo "🎯 Found processes to kill: $PIDS"
+            echo "$PIDS" | xargs -r kill -TERM 2>/dev/null || true
+            sleep 2
+            echo "$PIDS" | xargs -r kill -9 2>/dev/null || true
+        else
+            echo "👍 No bot processes found"
+        fi
+    fi
+    
+    # Method 3: Try to find Python processes using different approaches
+    echo "🔍 Final cleanup check..."
+    if command -v pgrep >/dev/null 2>&1; then
+        PYTHON_PIDS=$(pgrep -f "python.*bot" 2>/dev/null || true)
+        if [ ! -z "$PYTHON_PIDS" ]; then
+            echo "🎯 Found remaining Python bot processes: $PYTHON_PIDS"
+            echo "$PYTHON_PIDS" | xargs -r kill -9 2>/dev/null || true
+        fi
+    fi
+    
+    # Extra safety: kill any process listening on our expected ports
+    if command -v lsof >/dev/null 2>&1; then
+        echo "🔍 Checking for processes on port 8000..."
+        PORT_PIDS=$(lsof -ti:8000 2>/dev/null || true)
+        if [ ! -z "$PORT_PIDS" ]; then
+            echo "🎯 Found processes on port 8000: $PORT_PIDS"
+            echo "$PORT_PIDS" | xargs -r kill -9 2>/dev/null || true
+        fi
+    fi
+    
+    sleep 1
     echo "✅ Previous instances cleaned up"
 }
 
@@ -123,41 +154,74 @@ cleanup_previous_instances() {
 reset_telegram_webhook() {
     echo "🔄 Resetting Telegram webhook to ensure clean start..."
     
+    # First, try to delete webhook with drop_pending_updates
     python3 -c "
 import asyncio
 import aiohttp
 import os
 import sys
-from pathlib import Path
-
-# Add project root to Python path (use current directory since __file__ is not available in -c mode)
-project_root = Path('.').resolve()
-sys.path.insert(0, str(project_root / 'src'))
+import time
 
 async def reset_webhook():
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     if not token:
         print('⚠️  No TELEGRAM_BOT_TOKEN found, skipping webhook reset')
-        return
+        return False
     
-    url = f'https://api.telegram.org/bot{token}/deleteWebhook'
+    base_url = f'https://api.telegram.org/bot{token}'
+    
     try:
         connector = aiohttp.TCPConnector(enable_cleanup_closed=True)
-        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as session:
-            async with session.post(url, json={'drop_pending_updates': True}) as resp:
+        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=15)) as session:
+            
+            # Step 1: Delete webhook with drop_pending_updates
+            print('🧹 Deleting webhook and dropping pending updates...')
+            async with session.post(f'{base_url}/deleteWebhook', json={'drop_pending_updates': True}) as resp:
+                result1 = await resp.json()
                 if resp.status == 200:
-                    print('✅ Telegram webhook reset successfully')
+                    print(f'✅ Webhook deleted: {result1.get(\"description\", \"OK\")}')
                 else:
-                    print(f'⚠️  Webhook reset returned status: {resp.status}')
+                    print(f'⚠️  Delete webhook failed: {result1}')
+            
+            # Wait a moment
+            await asyncio.sleep(2)
+            
+            # Step 2: Use getUpdates to clear any remaining updates
+            print('🧹 Clearing remaining updates with getUpdates...')
+            async with session.post(f'{base_url}/getUpdates', json={'offset': -1, 'limit': 1, 'timeout': 0}) as resp:
+                result2 = await resp.json()
+                if resp.status == 200:
+                    print(f'✅ GetUpdates cleared: got {len(result2.get(\"result\", []))} updates')
+                else:
+                    print(f'⚠️  GetUpdates failed: {result2}')
+            
+            # Wait another moment
+            await asyncio.sleep(1)
+            
+            # Step 3: Set webhook to empty (extra cleanup)
+            print('🧹 Final webhook cleanup...')
+            async with session.post(f'{base_url}/setWebhook', json={'url': '', 'drop_pending_updates': True}) as resp:
+                result3 = await resp.json()
+                if resp.status == 200:
+                    print(f'✅ Webhook cleared: {result3.get(\"description\", \"OK\")}')
+                else:
+                    print(f'⚠️  Set empty webhook failed: {result3}')
+            
+            return True
+            
     except Exception as e:
-        print(f'⚠️  Failed to reset webhook: {e}')
-    
-    # Small delay to ensure webhook is fully reset
-    await asyncio.sleep(1)
+        print(f'❌ Webhook reset failed with exception: {e}')
+        return False
 
-if __name__ == '__main__':
-    asyncio.run(reset_webhook())
-" || true
+# Run the reset
+success = asyncio.run(reset_webhook())
+if success:
+    print('✅ Telegram webhook reset completed')
+    exit(0)
+else:
+    print('⚠️  Webhook reset had issues, but continuing...')
+    exit(1)
+" && echo "✅ Webhook reset successful" || echo "⚠️  Webhook reset had issues but continuing..."
 }
 
 # Function to start the health check server
@@ -215,6 +279,10 @@ main() {
     
     # Reset Telegram webhook to avoid conflicts
     reset_telegram_webhook
+    
+    # Give Telegram API extra time to process webhook reset
+    echo "⏳ Waiting for Telegram API to process webhook reset..."
+    sleep 5
     
     # Wait for PostgreSQL
     wait_for_postgres
