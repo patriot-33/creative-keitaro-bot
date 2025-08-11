@@ -98,16 +98,23 @@ except Exception as e:
 cleanup_previous_instances() {
     echo "🧹 Cleaning up previous bot instances..."
     
-    # Kill any remaining Python processes that might be running the bot
-    pkill -f "python.*src.bot.main" || true
-    pkill -f "python.*main.py" || true
-    
-    # Wait a moment for processes to terminate
-    sleep 2
-    
-    # Force kill if still running
-    pkill -9 -f "python.*src.bot.main" || true
-    pkill -9 -f "python.*main.py" || true
+    # Try to kill processes using different methods (pkill may not be available in containers)
+    if command -v pkill >/dev/null 2>&1; then
+        # Kill any remaining Python processes that might be running the bot
+        pkill -f "python.*src.bot.main" 2>/dev/null || true
+        pkill -f "python.*main.py" 2>/dev/null || true
+        
+        # Wait a moment for processes to terminate
+        sleep 2
+        
+        # Force kill if still running
+        pkill -9 -f "python.*src.bot.main" 2>/dev/null || true
+        pkill -9 -f "python.*main.py" 2>/dev/null || true
+    else
+        # Alternative method using ps and kill
+        ps aux | grep -E "python.*src\.bot\.main|python.*main\.py" | grep -v grep | awk '{print $2}' | xargs -r kill -9 2>/dev/null || true
+        sleep 1
+    fi
     
     echo "✅ Previous instances cleaned up"
 }
@@ -123,8 +130,8 @@ import os
 import sys
 from pathlib import Path
 
-# Add project root to Python path
-project_root = Path(__file__).parent.resolve()
+# Add project root to Python path (use current directory since __file__ is not available in -c mode)
+project_root = Path('.').resolve()
 sys.path.insert(0, str(project_root / 'src'))
 
 async def reset_webhook():
