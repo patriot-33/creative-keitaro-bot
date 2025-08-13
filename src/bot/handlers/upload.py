@@ -27,6 +27,8 @@ class UploadStates(StatesGroup):
     waiting_geo = State()
     waiting_custom_geo = State()
     waiting_file = State()
+    choosing_naming = State()  # Новое состояние: выбор типа названия
+    waiting_custom_name = State()  # Новое состояние: ввод пользовательского названия
     waiting_notes = State()
 
 async def load_custom_geos() -> List[str]:
@@ -74,11 +76,52 @@ CUSTOM_GEOS_FILE = "data/custom_geos.json"
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.mp4', '.mov', '.gif', '.webp'}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
-def generate_creative_id(geo: str) -> str:
-    """Генерация ID креатива в формате IDGEOДДММГГNNN"""
+def generate_creative_id(geo: str, buyer_id: str = None, custom_name: str = None) -> str:
+    """Генерация ID креатива: пользовательское название или автогенерация
+    
+    Args:
+        geo: Код географии (US, TR, AZ и т.д.)
+        buyer_id: ID байера пользователя (v1, n1, и т.д.)
+        custom_name: Пользовательское название (tr12, test24 и т.д.)
+    
+    Returns:
+        str: Итоговый creative_id
+        
+    Examples:
+        Пользовательское: generate_creative_id("US", "v1", "tr12") -> "v1tr12"
+        Автогенерация: generate_creative_id("US") -> "IDUS131225001"
+    """
+    import re
     from datetime import datetime
     import random
     
+    # Если есть buyer_id и custom_name - создаем пользовательское название
+    if buyer_id and buyer_id.strip() and custom_name and custom_name.strip():
+        # Нормализация: приводим к lowercase
+        normalized_buyer = buyer_id.lower().strip()
+        normalized_name = custom_name.lower().strip()
+        
+        # Валидация символов: только латиница и цифры
+        if not re.match(r'^[a-z0-9]+$', normalized_buyer):
+            raise ValueError(f"Buyer ID содержит недопустимые символы: {buyer_id}")
+        if not re.match(r'^[a-z0-9]+$', normalized_name):
+            raise ValueError(f"Название содержит недопустимые символы: {custom_name}")
+        
+        # Создаем итоговый ID
+        result = f"{normalized_buyer}{normalized_name}"
+        
+        # Проверка длины (безопасный лимит)
+        if len(result) > 25:
+            raise ValueError(f"Название слишком длинное: {len(result)} символов (макс. 25)")
+        
+        # Проверка на запрещенные значения
+        forbidden_values = ['null', 'unknown', 'empty']
+        if result in forbidden_values:
+            raise ValueError(f"Запрещенное название: {result}")
+            
+        return result
+    
+    # Автогенерация в стандартном формате
     now = datetime.now()
     date_part = now.strftime('%d%m%y')  # ДДММГГ
     sequence = random.randint(1, 999)   # Случайный номер 001-999
@@ -298,13 +341,13 @@ async def handle_file_upload(message: Message, state: FSMContext):
     )
     
     logger.info(f"File processed: {file_name}, size: {file_size}, ext: {file_ext}, geo: {geo}")
-    await state.set_state(UploadStates.waiting_notes)
-    logger.info("State set to waiting_notes")
+    await state.set_state(UploadStates.choosing_naming)
+    logger.info("State set to choosing_naming")
     
-    # Клавиатура для добавления заметок
+    # Клавиатура для выбора типа названия
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💬 Добавить описание", callback_data="add_notes")],
-        [InlineKeyboardButton(text="✅ Сохранить без описания", callback_data="save_creative")],
+        [InlineKeyboardButton(text="📝 Задать своё название", callback_data="custom_naming")],
+        [InlineKeyboardButton(text="🤖 Автоматическое название", callback_data="auto_naming")],
         [InlineKeyboardButton(text="❌ Отменить", callback_data="upload_cancel")]
     ])
     
@@ -316,14 +359,170 @@ async def handle_file_upload(message: Message, state: FSMContext):
 📏 <b>Размер:</b> {file_size / 1024:.0f} КБ
 🎯 <b>Тип:</b> {file_ext.upper()}
 
-💬 <b>Хотите добавить описание к креативу?</b>
+🎯 <b>Выберите тип названия креатива:</b>
 
-Описание поможет другим пользователям понять содержание креатива.
+📝 <b>Своё название</b> - вы задаете уникальное имя (например: tr12)
+🤖 <b>Автоматическое</b> - система сгенерирует стандартное название
+
+💡 <b>Пользовательские названия</b> будут иметь формат: <code>ваш_buyer_id + название</code>
 """
     
     logger.info("Sending notes prompt message to user")
     await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
     logger.info(f"User {user.id} uploaded file: {file_name} ({file_size} bytes) - notes prompt sent")
+
+@router.callback_query(F.data == "custom_naming")
+async def handle_custom_naming(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора пользовательского названия"""
+    await state.set_state(UploadStates.waiting_custom_name)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🤖 Автоматическое название", callback_data="auto_naming")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="upload_cancel")]
+    ])
+    
+    text = """
+📝 <b>Пользовательское название</b>
+
+✍️ <b>Введите своё название креатива:</b>
+
+📋 <b>Требования:</b>
+• Только латинские буквы и цифры
+• Длина: 2-20 символов
+• Пример: tr12, test24, promo1
+
+💡 <b>Итоговое название будет:</b> <code>ваш_buyer_id + название</code>
+"""
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(F.data == "auto_naming")
+async def handle_auto_naming(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора автоматического названия"""
+    await state.set_state(UploadStates.waiting_notes)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Добавить описание", callback_data="add_notes")],
+        [InlineKeyboardButton(text="💾 Сохранить без описания", callback_data="save_creative")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="upload_cancel")]
+    ])
+    
+    text = """
+🤖 <b>Автоматическое название выбрано!</b>
+
+📋 <b>Система сгенерирует стандартное название в формате:</b>
+<code>IDГEOДДММГГNNN</code>
+
+💬 <b>Хотите добавить описание к креативу?</b>
+
+💡 Описание поможет лучше идентифицировать креатив в отчетах
+"""
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+@router.message(UploadStates.waiting_custom_name)
+async def handle_custom_name_input(message: Message, state: FSMContext):
+    """Обработка ввода пользовательского названия"""
+    import re
+    from sqlalchemy import select
+    from db.models.creative import Creative
+    from db.database import get_db_session
+    
+    user = message.from_user
+    custom_name = message.text.strip()
+    
+    # Валидация
+    if len(custom_name) < 2 or len(custom_name) > 20:
+        await message.answer(
+            "❌ <b>Некорректная длина!</b>\n\n"
+            "📏 Название должно содержать от 2 до 20 символов\n"
+            "📝 Попробуйте еще раз:",
+            parse_mode="HTML"
+        )
+        return
+    
+    if not re.match(r'^[a-zA-Z0-9]+$', custom_name):
+        await message.answer(
+            "❌ <b>Недопустимые символы!</b>\n\n"
+            "✅ Разрешены только латинские буквы и цифры\n"
+            "💡 Примеры: tr12, test24, promo1\n"
+            "📝 Попробуйте еще раз:",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Получаем buyer_id пользователя
+    user_info = settings.allowed_users.get(user.id, {}) or settings.allowed_users.get(str(user.id), {})
+    buyer_id = user_info.get('buyer_id', '')
+    
+    if not buyer_id:
+        await message.answer(
+            "❌ <b>Buyer ID не найден!</b>\n\n"
+            "🔧 Обратитесь к администратору для настройки профиля\n"
+            "💡 Пока используется автоматическое название",
+            parse_mode="HTML"
+        )
+        await state.set_state(UploadStates.waiting_notes)
+        return
+    
+    # Проверяем уникальность в рамках buyer_id
+    try:
+        user_data = await state.get_data()
+        geo = user_data.get('geo')
+        
+        # Генерируем итоговый creative_id
+        final_creative_id = generate_creative_id(geo, buyer_id, custom_name)
+        
+        # Проверяем уникальность в базе
+        async with get_db_session() as session:
+            stmt = select(Creative).where(Creative.creative_id == final_creative_id)
+            existing = await session.execute(stmt)
+            if existing.scalar_one_or_none():
+                await message.answer(
+                    f"❌ <b>Название уже используется!</b>\n\n"
+                    f"🆔 Креатив с ID <code>{final_creative_id}</code> уже существует\n"
+                    f"📝 Выберите другое название:",
+                    parse_mode="HTML"
+                )
+                return
+        
+        # Сохраняем пользовательское название
+        await state.update_data(custom_name=custom_name)
+        await state.set_state(UploadStates.waiting_notes)
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Добавить описание", callback_data="add_notes")],
+            [InlineKeyboardButton(text="💾 Сохранить без описания", callback_data="save_creative")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="upload_cancel")]
+        ])
+        
+        text = f"""
+✅ <b>Название принято!</b>
+
+🆔 <b>ID креатива:</b> <code>{final_creative_id}</code>
+📝 <b>Ваше название:</b> {custom_name}
+👤 <b>Buyer ID:</b> {buyer_id}
+
+💬 <b>Хотите добавить описание к креативу?</b>
+
+💡 Описание поможет лучше идентифицировать креатив в отчетах
+"""
+        
+        await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+        
+    except ValueError as e:
+        await message.answer(
+            f"❌ <b>Ошибка валидации:</b>\n{str(e)}\n\n📝 Попробуйте другое название:",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Error processing custom name: {e}")
+        await message.answer(
+            "❌ <b>Системная ошибка!</b>\n\n🔧 Попробуйте еще раз или обратитесь к администратору",
+            parse_mode="HTML"
+        )
 
 @router.callback_query(F.data == "add_notes")
 async def handle_add_notes(callback: CallbackQuery, state: FSMContext):
@@ -383,6 +582,173 @@ async def handle_notes_input(message: Message, state: FSMContext):
     
     await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
+# ===== НОВЫЕ ОБРАБОТЧИКИ ДЛЯ ПОЛЬЗОВАТЕЛЬСКИХ НАЗВАНИЙ =====
+
+@router.callback_query(F.data == "custom_naming")
+async def handle_custom_naming(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора пользовательского названия"""
+    user = callback.from_user
+    
+    # Получаем buyer_id пользователя
+    allowed_users = settings.allowed_users
+    user_info = allowed_users.get(user.id) or allowed_users.get(str(user.id))
+    buyer_id = user_info.get('buyer_id', '') if user_info else ''
+    
+    # Проверяем есть ли у пользователя buyer_id
+    if not buyer_id or not buyer_id.strip():
+        await callback.answer("❌ У вас не назначен Buyer ID. Пользовательские названия недоступны.")
+        
+        # Автоматически переходим к описанию
+        await state.set_state(UploadStates.waiting_notes)
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Добавить описание", callback_data="add_notes")],
+            [InlineKeyboardButton(text="✅ Сохранить без описания", callback_data="save_creative")],
+            [InlineKeyboardButton(text="❌ Отменить", callback_data="upload_cancel")]
+        ])
+        
+        text = """
+⚠️ <b>Buyer ID не найден</b>
+
+Пользовательские названия доступны только пользователям с назначенным Buyer ID.
+Будет использовано автоматическое название.
+
+💬 <b>Хотите добавить описание к креативу?</b>
+"""
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        return
+    
+    # Переходим к вводу названия
+    await state.set_state(UploadStates.waiting_custom_name)
+    await state.update_data(buyer_id=buyer_id)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🤖 Использовать автоматическое", callback_data="auto_naming")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="upload_cancel")]
+    ])
+    
+    text = f"""
+📝 <b>Пользовательское название</b>
+
+👤 <b>Ваш Buyer ID:</b> <code>{buyer_id}</code>
+
+✍️ <b>Введите название креатива (2-20 символов):</b>
+
+📋 <b>Правила:</b>
+• Только латинские буквы (a-z) и цифры (0-9)
+• Длина: 2-20 символов
+• Без пробелов и специальных символов
+
+💡 <b>Примеры:</b> tr12, test24, promo01
+
+🎯 <b>Итоговое название будет:</b> <code>{buyer_id}ваше_название</code>
+"""
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(F.data == "auto_naming") 
+async def handle_auto_naming(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора автоматического названия"""
+    # Переходим к добавлению описания
+    await state.set_state(UploadStates.waiting_notes)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Добавить описание", callback_data="add_notes")],
+        [InlineKeyboardButton(text="✅ Сохранить без описания", callback_data="save_creative")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="upload_cancel")]
+    ])
+    
+    text = """
+🤖 <b>Автоматическое название выбрано</b>
+
+Система сгенерирует уникальное название в стандартном формате.
+
+💬 <b>Хотите добавить описание к креативу?</b>
+
+Описание поможет другим пользователям понять содержание креатива.
+"""
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+@router.message(UploadStates.waiting_custom_name)
+async def handle_custom_name_input(message: Message, state: FSMContext):
+    """Обработка ввода пользовательского названия"""
+    import re
+    from bot.services.creatives import CreativesService
+    
+    custom_name = message.text.strip()
+    user_data = await state.get_data()
+    buyer_id = user_data.get('buyer_id', '')
+    
+    # Валидация длины
+    if len(custom_name) < 2 or len(custom_name) > 20:
+        await message.answer(
+            "❌ <b>Неверная длина названия!</b>\n\n"
+            f"📏 Ваше название: {len(custom_name)} символов\n"
+            f"📏 Требуется: 2-20 символов\n\n"
+            f"✍️ Попробуйте ещё раз:",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Валидация символов
+    if not re.match(r'^[a-zA-Z0-9]+$', custom_name):
+        await message.answer(
+            "❌ <b>Недопустимые символы!</b>\n\n"
+            f"📝 Ваше название: <code>{custom_name}</code>\n"
+            f"✅ Разрешены: латинские буквы (a-z) и цифры (0-9)\n"
+            f"❌ Запрещены: пробелы, русские буквы, спецсимволы\n\n"
+            f"✍️ Попробуйте ещё раз:",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Генерируем итоговый ID для проверки уникальности
+    try:
+        potential_id = generate_creative_id("", buyer_id, custom_name)
+    except ValueError as e:
+        await message.answer(
+            f"❌ <b>Ошибка названия:</b>\n\n{e}\n\n✍️ Попробуйте другое название:",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Проверяем уникальность в рамках buyer_id  
+    existing_creative = await CreativesService.get_creative_by_id(potential_id)
+    if existing_creative:
+        await message.answer(
+            f"❌ <b>Название уже занято!</b>\n\n"
+            f"📝 Название <code>{custom_name}</code> уже используется\n"
+            f"🎯 Итоговый ID: <code>{potential_id}</code>\n\n"
+            f"✍️ Попробуйте другое название:",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Сохраняем название и переходим к описанию
+    await state.update_data(custom_name=custom_name)
+    await state.set_state(UploadStates.waiting_notes)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 Добавить описание", callback_data="add_notes")],
+        [InlineKeyboardButton(text="✅ Сохранить без описания", callback_data="save_creative")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="upload_cancel")]
+    ])
+    
+    text = f"""
+✅ <b>Название принято!</b>
+
+📝 <b>Ваше название:</b> <code>{custom_name}</code>
+👤 <b>Buyer ID:</b> <code>{buyer_id}</code>
+🎯 <b>Итоговый ID:</b> <code>{potential_id}</code>
+
+💬 <b>Хотите добавить описание к креативу?</b>
+"""
+    
+    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
 @router.callback_query(F.data == "save_creative")
 async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
     """Сохранение креатива"""
@@ -396,9 +762,14 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
     file_size = user_data.get('file_size', 0)
     file_ext = user_data.get('file_ext', '.unknown')
     notes = user_data.get('notes', '')
+    custom_name = user_data.get('custom_name')
     
-    # Генерируем ID креатива
-    creative_id = generate_creative_id(geo)
+    # Получаем информацию о пользователе для buyer_id
+    user_info = settings.allowed_users.get(user.id, {}) or settings.allowed_users.get(str(user.id), {})
+    buyer_id = user_info.get('buyer_id', '')
+    
+    # Генерируем ID креатива (с учетом пользовательского названия)
+    creative_id = generate_creative_id(geo, buyer_id, custom_name)
     
     # Определяем MIME type
     mime_type = 'application/octet-stream'  # default
@@ -410,10 +781,6 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         mime_type = 'video/mp4'
     elif file_ext.lower() == '.gif':
         mime_type = 'image/gif'
-    
-    # Получаем информацию о пользователе
-    user_info = settings.allowed_users.get(user.id, {}) or settings.allowed_users.get(str(user.id), {})
-    buyer_id = user_info.get('buyer_id', '')
     
     await callback.message.edit_text("⏳ <b>Сохраняем креатив...</b>", parse_mode="HTML")
     
@@ -516,7 +883,8 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
                 size_bytes=file_size,
                 sha256=sha256_hash,
                 upload_dt=datetime.utcnow(),
-                notes=notes or None
+                notes=notes or None,
+                custom_name=custom_name or None
             )
             
             session.add(creative)
@@ -524,12 +892,19 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         
         logger.info(f"Creative {creative_id} saved successfully for user {user.id} (using Telegram storage)")
         
+        # Формируем информацию о названии
+        naming_info = ""
+        if custom_name:
+            naming_info = f"📝 <b>Пользовательское название:</b> {custom_name}\n"
+        else:
+            naming_info = f"🤖 <b>Название:</b> автоматическое\n"
+        
         success_text = f"""
 🎉 <b>Креатив успешно сохранен!</b>
 
 🆔 <b>ID креатива:</b> <code>{creative_id}</code>
 🌍 <b>ГЕО:</b> {geo}
-📄 <b>Файл:</b> {file_name}
+{naming_info}📄 <b>Файл:</b> {file_name}
 📏 <b>Размер:</b> {file_size / 1024:.0f} КБ
 👤 <b>Загружен:</b> {user.first_name}
 🏷 <b>Buyer ID:</b> {buyer_id or 'не указан'}
@@ -685,12 +1060,3 @@ async def handle_upload_cancel(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer("❌ Загрузка отменена")
 
-def generate_creative_id(geo: str) -> str:
-    """Генерация уникального ID креатива"""
-    now = datetime.now()
-    date_str = now.strftime("%d%m%y")
-    
-    # Простая генерация номера (в реальности должна быть связана с БД)
-    sequence = now.strftime("%H%M%S")[-3:]  # Последние 3 цифры времени как номер
-    
-    return f"ID{geo.upper()}{date_str}{sequence}"

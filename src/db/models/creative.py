@@ -31,6 +31,7 @@ class Creative(Base):
         DateTime(timezone=True), nullable=False
     )
     notes: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    custom_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # Relationships
     uploader: Mapped["User"] = relationship(
