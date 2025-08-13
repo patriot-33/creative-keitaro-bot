@@ -140,8 +140,17 @@ async def save_user_to_database(user_id: int, user_data: dict, approved_by_id: i
                 existing_user.tg_username = user_data.get('username', '')
                 existing_user.full_name = user_data.get('first_name', '')
                 existing_user.is_active = True
-                if approved_by_id:
-                    existing_user.created_by_id = approved_by_id
+                
+                # Обновляем created_by_id только если он не установлен и есть approved_by_id
+                if not existing_user.created_by_id and approved_by_id:
+                    # Находим внутренний ID пользователя-аппровера
+                    approver_result = await session.execute(select(User).where(User.tg_user_id == approved_by_id))
+                    approver_user = approver_result.scalar_one_or_none()
+                    if approver_user:
+                        existing_user.created_by_id = approver_user.id
+                        logger.info(f"Set created_by_id={approver_user.id} for existing user {user_id}")
+                    else:
+                        logger.warning(f"Approver {approved_by_id} not found in DB for existing user update")
             else:
                 # Проверяем, существует ли approved_by_id в БД
                 logger.info(f"Creating new user {user_id}")
@@ -187,9 +196,55 @@ async def save_user_to_database(user_id: int, user_data: dict, approved_by_id: i
         logger.error(f"Failed to save user {user_id} to database: {e}")
         return False
 
+async def ensure_owners_in_database():
+    """Убеждаемся, что все овнеры из settings есть в базе данных"""
+    try:
+        async with get_db_session() as session:
+            # Находим всех овнеров в настройках
+            owner_ids = []
+            for user_id, user_data in settings.allowed_users.items():
+                if user_data.get('role') == 'owner':
+                    # Проверяем оба формата ID (int и str)
+                    tg_user_id = int(user_id) if isinstance(user_id, str) else user_id
+                    owner_ids.append(tg_user_id)
+            
+            logger.info(f"Found {len(owner_ids)} owners in settings: {owner_ids}")
+            
+            # Проверяем каждого овнера в базе данных
+            for owner_id in owner_ids:
+                result = await session.execute(select(User).where(User.tg_user_id == owner_id))
+                existing_owner = result.scalar_one_or_none()
+                
+                if not existing_owner:
+                    # Создаем овнера в базе данных
+                    owner_data = settings.allowed_users.get(owner_id) or settings.allowed_users.get(str(owner_id))
+                    logger.info(f"Creating missing owner {owner_id} in database")
+                    
+                    new_owner = User(
+                        tg_user_id=owner_id,
+                        tg_username=owner_data.get('username', ''),
+                        full_name=owner_data.get('first_name', ''),
+                        role=UserRole.OWNER,
+                        buyer_id=owner_data.get('buyer_id'),
+                        is_active=True,
+                        created_by_id=None  # Овнеры создаются системой
+                    )
+                    session.add(new_owner)
+                    logger.info(f"Added owner {owner_id} to database")
+                else:
+                    logger.info(f"Owner {owner_id} already exists in database")
+            
+            await session.commit()
+            
+    except Exception as e:
+        logger.error(f"Error ensuring owners in database: {e}")
+
 async def sync_settings_with_database():
     """Синхронизация settings.allowed_users с базой данных"""
     try:
+        # Сначала убеждаемся, что овнеры есть в базе
+        await ensure_owners_in_database()
+        
         async with get_db_session() as session:
             result = await session.execute(select(User).where(User.is_active == True))
             db_users = result.scalars().all()

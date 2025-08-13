@@ -432,6 +432,14 @@ async def on_startup():
     # Load users from database
     await load_users_from_database()
     
+    # Ensure all owners from settings exist in database
+    try:
+        from bot.handlers.admin import ensure_owners_in_database
+        await ensure_owners_in_database()
+        logger.info("Owner synchronization completed!")
+    except Exception as e:
+        logger.warning(f"Owner synchronization failed: {e}")
+    
     # Create database tables
     try:
         async with engine.begin() as conn:
