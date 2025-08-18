@@ -986,10 +986,12 @@ class KeitaroClient:
         custom_start: Optional[str] = None,
         custom_end: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Get detailed creatives statistics with sub_id_4 as creative ID
+        """Get detailed creatives statistics using raw conversions data
+        
+        FIXED: Now uses sub_id_2 (actual creative ID) instead of sub_id_4
         
         Returns list of creative stats including:
-        - creative_id (from sub_id_4)
+        - creative_id (from sub_id_2 - actual creative ID field)
         - buyer_id (from sub_id_1)
         - geo/country
         - clicks, unique_clicks, conversions, deposits, revenue
@@ -1066,22 +1068,158 @@ class KeitaroClient:
                 end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
         
         try:
-            logger.info(f"=== KEITARO CLIENT DEBUG ===")
-            logger.info(f"get_creatives_report called with: period={period}, buyer_id={buyer_id}, geo={geo}, traffic_source_ids={traffic_source_ids}")
+            logger.info(f"=== KEITARO CREATIVES REPORT (FIXED) ===")
             logger.info(f"Date range: {start_date} - {end_date}")
+            logger.info(f"Using raw conversions/log API to match CSV data exactly")
             
-            # ВАЖНО: Логируем точные даты для проверки исправления
-            from datetime import datetime
-            now_debug = datetime.now()
-            logger.info(f"DEBUG: Current time is {now_debug}")
-            logger.info(f"DEBUG: For LAST_7D we should use dates from {(now_debug - timedelta(days=6)).strftime('%Y-%m-%d')} to {now_debug.strftime('%Y-%m-%d')} (last 7 days including today)")
-            logger.info(f"DEBUG: ACTUAL dates being used: {start_date} to {end_date}")
+            # FIXED APPROACH: Use conversions/log API directly (same as CSV data source)
+            # This gives us the same raw data that appears in the CSV export
+            payload = {
+                "limit": 50000,  # Get all conversions
+                "columns": [
+                    "conversion_id", "sub_id_1", "sub_id_2", "sub_id_4", "status", "revenue", 
+                    "ts_id", "ts", "country", "offer", "stream", 
+                    "click_datetime", "postback_datetime"
+                ],
+                "filters": [
+                    {
+                        "name": "postback_datetime",  # Use postback_datetime to match CSV
+                        "operator": "BETWEEN", 
+                        "expression": [start_date, end_date]
+                    }
+                ],
+                "sort": [
+                    {"name": "postback_datetime", "order": "DESC"}
+                ]
+            }
             
-            # FIRST REQUEST: Get main metrics without datetime for accurate aggregation
-            # Try without country grouping to avoid splitting data across countries
-            main_report_params = {
-                'metrics': ['clicks', 'global_unique_clicks', 'conversions', 'leads', 'sales', 'revenue'],
-                'columns': ['sub_id_4', 'sub_id_1'],  # Remove country to get unified data
+            # Add filters if specified
+            if buyer_id:
+                payload['filters'].append({
+                    'name': 'sub_id_1',
+                    'operator': 'EQUALS',
+                    'expression': buyer_id
+                })
+            
+            if geo:
+                payload['filters'].append({
+                    'name': 'country', 
+                    'operator': 'EQUALS',
+                    'expression': geo
+                })
+            
+            if traffic_source_ids:
+                payload['filters'].append({
+                    'name': 'ts_id',
+                    'operator': 'IN_LIST', 
+                    'expression': traffic_source_ids
+                })
+            
+            logger.info(f"🔄 Getting raw conversions data...")
+            logger.info(f"Request payload: {payload}")
+            
+            # Get raw conversions data (same as CSV source)
+            data = await self._make_request('/admin_api/v1/conversions/log', method='POST', json=payload)
+            
+            if not data:
+                logger.error("❌ No conversions data received")
+                return []
+            
+            # Handle response format
+            rows_data = data if isinstance(data, list) else data.get('rows', [])
+            
+            if not rows_data:
+                logger.warning(f"No conversions found for period. Response keys: {list(data.keys()) if isinstance(data, dict) else 'list'}")
+                return []
+            
+            logger.info(f"✅ Found {len(rows_data)} raw conversions")
+            
+            # Process raw conversions to create creative statistics (like CSV)
+            creative_stats = {}
+            
+            for row in rows_data:
+                # FIXED: Use sub_id_2 as creative_id (not sub_id_4)
+                creative_id = row.get('sub_id_2', '')
+                buyer_id_from_row = row.get('sub_id_1', '')
+                country = row.get('country', '')
+                revenue = float(row.get('revenue', 0))
+                status = row.get('status', '')
+                
+                # Skip empty creative IDs
+                if not creative_id or creative_id.strip() == '':
+                    continue
+                    
+                # Initialize creative if not exists
+                if creative_id not in creative_stats:
+                    creative_stats[creative_id] = {
+                        'creative_id': creative_id,
+                        'buyer_id': buyer_id_from_row,
+                        'countries': set(),
+                        'unique_clicks': 0,
+                        'leads': 0, 
+                        'deposits': 0,
+                        'revenue': 0.0,
+                        'conversions': 0,
+                        'active_days': set(),
+                        'raw_conversions': []
+                    }
+                
+                # Add data to creative stats
+                creative_stats[creative_id]['countries'].add(country)
+                creative_stats[creative_id]['revenue'] += revenue
+                creative_stats[creative_id]['conversions'] += 1
+                
+                # Count leads vs deposits based on status
+                if status in ['lead', 'lead_confirmed']:
+                    creative_stats[creative_id]['leads'] += 1
+                elif status in ['sale', 'dep', 'dep_confirmed', 'first_dep_confirmed']:
+                    creative_stats[creative_id]['deposits'] += 1
+                
+                # Track conversion date for active days
+                postback_datetime = row.get('postback_datetime', '')
+                if postback_datetime:
+                    try:
+                        date_part = postback_datetime.split('T')[0] if 'T' in postback_datetime else postback_datetime.split(' ')[0]
+                        creative_stats[creative_id]['active_days'].add(date_part)
+                    except:
+                        pass
+                
+                # Store raw conversion for debugging
+                creative_stats[creative_id]['raw_conversions'].append({
+                    'status': status,
+                    'revenue': revenue,
+                    'country': country,
+                    'datetime': postback_datetime
+                })
+            
+            logger.info(f"✅ Processed {len(creative_stats)} unique creatives from raw conversions")
+            
+            # DIAGNOSTIC: Log TR32 specifically
+            if 'tr32' in creative_stats:
+                tr32_data = creative_stats['tr32']
+                logger.info(f"🎯 TR32 FOUND in conversions:")
+                logger.info(f"  - Deposits: {tr32_data['deposits']}")
+                logger.info(f"  - Leads: {tr32_data['leads']}")
+                logger.info(f"  - Revenue: ${tr32_data['revenue']:.2f}")
+                logger.info(f"  - Countries: {list(tr32_data['countries'])}")
+                logger.info(f"  - Active days: {len(tr32_data['active_days'])}")
+                logger.info(f"  - Total conversions: {len(tr32_data['raw_conversions'])}")
+            else:
+                logger.warning("⚠️ TR32 NOT FOUND in conversions data")
+                
+                # Check for similar creative IDs
+                tr_creatives = [cid for cid in creative_stats.keys() if 'tr' in cid.lower()]
+                logger.info(f"Found TR-related creatives: {tr_creatives}")
+            
+            logger.info(f"📊 Total creatives processed: {len(creative_stats)}")
+            sample_creatives = list(creative_stats.keys())[:10]
+            logger.info(f"📋 Sample creative IDs: {sample_creatives}")
+            
+            # Now we need to get clicks data to calculate uEPC
+            # Use the report/build API to get clicks for each creative using sub_id_2
+            clicks_payload = {
+                'metrics': ['clicks', 'unique_clicks'],
+                'columns': ['sub_id_2', 'sub_id_1'],
                 'filters': [
                     {
                         'name': 'datetime',
@@ -1089,106 +1227,90 @@ class KeitaroClient:
                         'expression': [start_date, end_date]
                     }
                 ],
-                'grouping': ['sub_id_4', 'sub_id_1'],  # Remove country grouping
-                'sort': [{'name': 'revenue', 'order': 'DESC'}],
+                'grouping': ['sub_id_2', 'sub_id_1'],
+                'sort': [{'name': 'clicks', 'order': 'DESC'}],
                 'limit': 10000
             }
             
-            # Add buyer filter if specified
+            # Add same filters as conversions request
             if buyer_id:
-                main_report_params['filters'].append({
+                clicks_payload['filters'].append({
                     'name': 'sub_id_1',
                     'operator': 'EQUALS',
                     'expression': buyer_id
                 })
             
-            # Add geo filter if specified
             if geo:
-                main_report_params['filters'].append({
+                clicks_payload['filters'].append({
                     'name': 'country',
                     'operator': 'EQUALS',
                     'expression': geo
                 })
             
-            # Add traffic source filter if specified
             if traffic_source_ids:
-                main_report_params['filters'].append({
+                clicks_payload['filters'].append({
                     'name': 'ts_id',
                     'operator': 'IN_LIST',
                     'expression': traffic_source_ids
                 })
             
-            logger.info(f"Getting creatives report: {start_date} - {end_date}")
-            logger.info(f"Main report API params: {main_report_params}")
+            logger.info(f"🔄 Getting clicks data...")
+            clicks_data = await self._make_request('/admin_api/v1/report/build', method='POST', json=clicks_payload)
             
-            # Get main report data (accurate metrics)
-            logger.error("🚨 CRITICAL: About to make main API request...")
-            data = await self._make_request('/admin_api/v1/report/build', method='POST', json=main_report_params)
-            logger.error("🚨 CRITICAL: Main API request completed")
-            
-            logger.error(f"🔍 MAIN API DEBUG: Response received - type: {type(data)}")
-            logger.error(f"🔍 MAIN API DEBUG: Response is None: {data is None}")
-            logger.error(f"🔍 MAIN API DEBUG: Response is dict: {isinstance(data, dict)}")
-            
-            if isinstance(data, dict):
-                logger.error(f"🔍 MAIN API DEBUG: Dict keys: {list(data.keys())}")
-                logger.error(f"🔍 MAIN API DEBUG: Has 'rows' key: {'rows' in data}")
-                if 'rows' in data:
-                    logger.error(f"🔍 MAIN API DEBUG: Rows length: {len(data['rows'])}")
-                    if len(data['rows']) > 0:
-                        logger.error(f"🔍 MAIN API DEBUG: First row sample: {data['rows'][0]}")
-                else:
-                    logger.error(f"🔍 MAIN API DEBUG: Available keys instead of 'rows': {list(data.keys())}")
-                    logger.error(f"🔍 MAIN API DEBUG: Full response content: {data}")
-            else:
-                logger.error(f"🔍 MAIN API DEBUG: Non-dict response: {data}")
-            
-            # CRITICAL FIX: Handle different API response formats
-            if not data:
-                logger.error("🚨 CRITICAL: API returned None or empty response")
-                return []
-            
-            # Try different possible response formats
-            rows_data = None
-            if isinstance(data, dict):
-                if 'rows' in data:
-                    rows_data = data['rows']
-                    logger.error(f"✅ Found 'rows' key with {len(rows_data)} items")
-                elif 'data' in data:
-                    rows_data = data['data']
-                    logger.error(f"✅ Found 'data' key instead of 'rows' with {len(rows_data)} items")
-                elif 'result' in data:
-                    rows_data = data['result']
-                    logger.error(f"✅ Found 'result' key instead of 'rows' with {len(rows_data)} items")
-                elif isinstance(data, list):
-                    rows_data = data
-                    logger.error(f"✅ Response is a direct list with {len(rows_data)} items")
-                else:
-                    logger.error(f"🚨 CRITICAL: Unknown response format. Keys: {list(data.keys())}")
-                    return []
-            elif isinstance(data, list):
-                rows_data = data
-                logger.error(f"✅ Response is a direct list with {len(rows_data)} items")
-            else:
-                logger.error(f"🚨 CRITICAL: Unexpected data type: {type(data)}")
-                return []
+            # Add clicks data to creative stats
+            if clicks_data and ('rows' in clicks_data or isinstance(clicks_data, list)):
+                clicks_rows = clicks_data if isinstance(clicks_data, list) else clicks_data.get('rows', [])
+                logger.info(f"✅ Found {len(clicks_rows)} clicks records")
                 
-            if not rows_data:
-                logger.error("🚨 CRITICAL: No data found in any expected format")
-                logger.error(f"Full response for analysis: {data}")
-                return []
+                for row in clicks_rows:
+                    creative_id = row.get('sub_id_2', '')
+                    if not creative_id or creative_id.strip() == '':
+                        continue
+                        
+                    if creative_id in creative_stats:
+                        creative_stats[creative_id]['unique_clicks'] = int(row.get('unique_clicks', 0))
+                        # Note: We don't update buyer_id from clicks data since conversions data is more accurate
+            else:
+                logger.warning("No clicks data received")
             
-            logger.error(f"✅ MAIN API SUCCESS: Using data with {len(rows_data)} rows for processing")
+            # Convert creative_stats to final result format
+            result = []
+            for creative_id, stats in creative_stats.items():
+                # Convert countries set to string
+                geos_string = ', '.join(sorted(stats['countries'])) if stats['countries'] else 'unknown'
+                
+                # Calculate uEPC
+                uepc = stats['revenue'] / stats['unique_clicks'] if stats['unique_clicks'] > 0 else 0
+                
+                # Calculate active days (count unique dates)
+                active_days = len(stats['active_days']) if stats['active_days'] else 1
+                
+                result.append({
+                    'creative_id': creative_id,
+                    'buyer_id': stats['buyer_id'],
+                    'geos': geos_string,
+                    'clicks': stats['unique_clicks'],  # Use unique_clicks as clicks
+                    'unique_clicks': stats['unique_clicks'],
+                    'conversions': stats['conversions'],
+                    'leads': stats['leads'],
+                    'deposits': stats['deposits'],
+                    'revenue': stats['revenue'],
+                    'uepc': uepc,
+                    'active_days': active_days
+                })
             
-            # SECOND REQUEST: Get active days data (with datetime grouping)
-            # Note: Some rows have empty sub_id_4, so we need to be more flexible
-            active_days_params = {
-                'metrics': ['clicks'],  # Just need clicks to count active days
-                'columns': ['sub_id_4', 'datetime'],
-                'filters': main_report_params['filters'].copy(),  # Same filters
-                'grouping': ['sub_id_4', 'datetime'],
-                'limit': 10000
-            }
+            # Sort by revenue descending (like CSV)
+            result.sort(key=lambda x: x['revenue'], reverse=True)
+            
+            logger.info(f"✅ Final result: {len(result)} unique creatives")
+            
+            # Log sample results for verification
+            if result:
+                logger.info(f"📊 Top 3 creatives by revenue:")
+                for i, creative in enumerate(result[:3]):
+                    logger.info(f"  {i+1}. {creative['creative_id']}: ${creative['revenue']:.2f} revenue, {creative['deposits']} deposits, {creative['leads']} leads")
+            
+            return result
             
             # Also try to get data with only sub_id_4 filter (no empty values)
             for filter_item in active_days_params['filters']:
