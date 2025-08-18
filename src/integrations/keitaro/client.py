@@ -1044,14 +1044,11 @@ class KeitaroClient:
                 end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
             elif period == ReportPeriod.LAST_7D:
                 # Последние 7 дней - от 7 дней назад до сегодня (включительно)
-                # Convert Moscow boundaries to UTC (Last 7 days)
-                start_moscow = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
-                end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                logger.info(f"LAST_7D period: {start_date} to {end_date} (last 7 days including today, UTC)")
+                # FIXED: Use Moscow time directly (no UTC conversion) to match CSV export
+                start_date = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+                logger.info(f"LAST_7D period: {start_date} to {end_date} (last 7 days including today, Moscow time)")
+                logger.info(f"🔄 TIMEZONE FIX: Using Moscow time directly to match CSV export period")
             elif period == ReportPeriod.LAST_30D:
                 # Convert Moscow boundaries to UTC (Last 30 days)
                 start_moscow = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
