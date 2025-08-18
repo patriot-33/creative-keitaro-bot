@@ -45,9 +45,24 @@ logger.info(f"Python version: {sys.version}")
 logger.info(f"Working directory: {os.getcwd()}")
 logger.info("="*80)
 
-# Initialize bot and dispatcher
-bot = Bot(token=settings.telegram_bot_token)
-dp = Dispatcher(storage=MemoryStorage())
+# Initialize bot and dispatcher (singleton pattern to prevent duplicates)
+_bot_instance = None
+_dp_instance = None
+
+def get_bot_instance():
+    global _bot_instance
+    if _bot_instance is None:
+        _bot_instance = Bot(token=settings.telegram_bot_token)
+    return _bot_instance
+
+def get_dispatcher_instance():
+    global _dp_instance
+    if _dp_instance is None:
+        _dp_instance = Dispatcher(storage=MemoryStorage())
+    return _dp_instance
+
+bot = get_bot_instance()
+dp = get_dispatcher_instance()
 
 
 class LoggingMiddleware(BaseMiddleware):
@@ -328,12 +343,12 @@ async def sync_file_users_to_database(session, file_users):
     await session.commit()
     logger.info("=== SYNC COMPLETED ===")
 
-async def force_bot_takeover():
-    """Aggressively claim bot control to resolve TelegramConflictError"""
+async def clean_telegram_api_state():
+    """Clean Telegram API state properly without creating conflicts"""
     import os
     import aiohttp
     
-    logger.info("💪 EMERGENCY: Attempting aggressive bot takeover...")
+    logger.info("🧹 Cleaning Telegram API state...")
     
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     if not token:
@@ -344,66 +359,62 @@ async def force_bot_takeover():
     
     try:
         connector = aiohttp.TCPConnector(enable_cleanup_closed=True)
-        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=20)) as session:
+        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=30)) as session:
             
-            logger.info('🔥 Step 1: Force delete webhook with drop_pending_updates')
-            async with session.post(f'{base_url}/deleteWebhook', json={'drop_pending_updates': True}) as resp:
-                result = await resp.json()
-                logger.info(f'  Webhook delete result: {result}')
+            logger.info('🔥 Step 1: Delete webhook with drop_pending_updates (retry until success)')
+            for attempt in range(5):
+                try:
+                    async with session.post(f'{base_url}/deleteWebhook', json={'drop_pending_updates': True}) as resp:
+                        result = await resp.json()
+                        logger.info(f'  Delete attempt {attempt+1}: {result}')
+                        if result.get('ok'):
+                            break
+                except Exception as e:
+                    logger.warning(f'  Delete attempt {attempt+1} failed: {e}')
+                await asyncio.sleep(3)
+                
+            await asyncio.sleep(5)
+            
+            logger.info('🔥 Step 2: Clear update queue completely')
+            # First clear with high offset
+            try:
+                async with session.post(f'{base_url}/getUpdates', json={'offset': 999999999, 'limit': 1, 'timeout': 0}) as resp:
+                    result = await resp.json()
+                    logger.info(f'  High offset clear: {result}')
+            except Exception as e:
+                logger.warning(f'  High offset clear failed: {e}')
                 
             await asyncio.sleep(3)
             
-            logger.info('🔥 Step 2: Aggressive getUpdates with high offset to skip all')
-            async with session.post(f'{base_url}/getUpdates', json={'offset': 999999999, 'limit': 1, 'timeout': 0}) as resp:
-                result = await resp.json()
-                logger.info(f'  High offset getUpdates result: {result}')
-                
-            await asyncio.sleep(2)
-            
-            logger.info('🔥 Step 3: Multiple rapid getUpdates to exhaust the queue')
-            for i in range(10):
-                logger.info(f'    Rapid getUpdates #{i+1}...')
-                async with session.post(f'{base_url}/getUpdates', json={'offset': -1, 'limit': 100, 'timeout': 0}) as resp:
-                    result = await resp.json()
-                    updates_count = len(result.get('result', []))
-                    logger.info(f'      Got {updates_count} updates')
-                    if updates_count == 0:
-                        break
-                await asyncio.sleep(0.1)
-            
-            logger.info('🔥 Step 4: Set webhook to dummy URL to block other instances')
-            dummy_url = 'https://httpbin.org/status/200'  # Safe dummy webhook
-            async with session.post(f'{base_url}/setWebhook', json={'url': dummy_url, 'drop_pending_updates': True}) as resp:
-                result = await resp.json()
-                logger.info(f'  Dummy webhook set result: {result}')
-            
-            logger.info('🔥 Step 4.5: Multiple getUpdates calls to force other instances to fail')
-            for attempt in range(20):  # 20 attempts to exhaust other instances
+            # Then ensure queue is empty
+            logger.info('🔥 Step 3: Verify queue is empty')
+            for i in range(5):
                 try:
-                    async with session.post(f'{base_url}/getUpdates', json={'offset': -1, 'limit': 1, 'timeout': 1}) as resp:
+                    async with session.post(f'{base_url}/getUpdates', json={'offset': -1, 'limit': 10, 'timeout': 0}) as resp:
                         result = await resp.json()
-                        if result.get('ok'):
-                            logger.info(f'  Force getUpdates attempt {attempt+1}/20: success')
-                        else:
-                            logger.info(f'  Force getUpdates attempt {attempt+1}/20: {result}')
-                    await asyncio.sleep(0.5)
+                        updates_count = len(result.get('result', [])) if result.get('ok') else 0
+                        logger.info(f'  Verification {i+1}: Got {updates_count} updates')
+                        if updates_count == 0:
+                            break
                 except Exception as e:
-                    logger.info(f'  Force getUpdates attempt {attempt+1}/20 failed: {e}')
-                    await asyncio.sleep(0.5)
+                    logger.warning(f'  Verification {i+1} failed: {e}')
+                    break
+                await asyncio.sleep(1)
             
-            logger.info('🔥 Waiting 30 seconds for other instances to fail completely...')
-            await asyncio.sleep(30)  # Longer wait for other instances to fail
+            logger.info('🔥 Step 4: Final webhook state cleanup')
+            try:
+                async with session.post(f'{base_url}/deleteWebhook', json={'drop_pending_updates': True}) as resp:
+                    result = await resp.json()
+                    logger.info(f'  Final cleanup: {result}')
+            except Exception as e:
+                logger.warning(f'  Final cleanup failed: {e}')
             
-            logger.info('🔥 Step 5: Remove dummy webhook and prepare for polling')
-            async with session.post(f'{base_url}/deleteWebhook', json={'drop_pending_updates': True}) as resp:
-                result = await resp.json()
-                logger.info(f'  Dummy webhook removed result: {result}')
-            
-            logger.info('✅ Bot takeover completed successfully')
+            logger.info('✅ Telegram API state cleaned - waiting for API to stabilize...')
+            await asyncio.sleep(20)  # Longer wait for API to stabilize
             return True
             
     except Exception as e:
-        logger.error(f'❌ Bot takeover failed: {e}')
+        logger.error(f'❌ Telegram API cleanup failed: {e}')
         return False
 
 async def on_startup():
@@ -421,9 +432,9 @@ async def on_startup():
     logger.info(f"  Service Name: {service_name}")
     logger.info(f"  Instance: {service_id}-{deploy_id}")
     
-    # EMERGENCY: Force bot takeover to resolve TelegramConflictError
-    logger.info("🚨 EMERGENCY MODE: Performing aggressive bot takeover")
-    await force_bot_takeover()
+    # Clean Telegram API state properly
+    logger.info("🧹 Cleaning Telegram API state...")
+    await clean_telegram_api_state()
     
     # Give Telegram API time to process the takeover
     logger.info("⏳ Waiting 10 seconds for Telegram API to process takeover...")
@@ -499,9 +510,9 @@ async def main():
             if "TelegramConflictError" in str(e) or "terminated by other getUpdates request" in str(e):
                 retry_count += 1
                 if retry_count < max_retries:
-                    logger.warning(f"TelegramConflictError detected, performing emergency takeover (retry {retry_count}/{max_retries})")
-                    await force_bot_takeover()
-                    await asyncio.sleep(20)  # Wait longer before retry
+                    logger.warning(f"TelegramConflictError detected, cleaning API state (retry {retry_count}/{max_retries})")
+                    await clean_telegram_api_state()
+                    await asyncio.sleep(30)  # Wait longer before retry
                     continue
                 else:
                     logger.error("Max retries reached for TelegramConflictError")
