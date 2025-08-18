@@ -94,9 +94,13 @@ class LoggingMiddleware(BaseMiddleware):
         
         elif event.callback_query:
             cb = event.callback_query
-            logger.info(f"CALLBACK QUERY: user_id={cb.from_user.id}, "
-                       f"data='{cb.data}', "
-                       f"message_id={cb.message.message_id if cb.message else 'inline'}")
+            logger.warning(f"🔔 CALLBACK QUERY RECEIVED:")
+            logger.warning(f"  User ID: {cb.from_user.id}")
+            logger.warning(f"  Username: {cb.from_user.username}")
+            logger.warning(f"  Data: '{cb.data}'")
+            logger.warning(f"  Message ID: {cb.message.message_id if cb.message else 'inline'}")
+            logger.warning(f"  Chat ID: {cb.message.chat.id if cb.message else 'inline'}")
+            logger.warning(f"  Instance: {INSTANCE_ID}")
         
         # Continue processing
         return await handler(event, data)

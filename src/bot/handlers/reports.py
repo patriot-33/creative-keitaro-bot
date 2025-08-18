@@ -1809,10 +1809,35 @@ async def cmd_export(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("export_"))
 async def handle_export_type(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора типа экспорта"""
-    export_type = callback.data.replace("export_", "")
+    logger.critical("="*80)
+    logger.critical("📊 EXPORT TYPE HANDLER TRIGGERED")
+    logger.critical(f"User ID: {callback.from_user.id}")
+    logger.critical(f"Username: {callback.from_user.username}")
+    logger.critical(f"Callback data: {callback.data}")
+    logger.critical(f"Message ID: {callback.message.message_id}")
+    logger.critical(f"Chat ID: {callback.message.chat.id}")
     
-    await state.update_data(export_type=export_type)
-    await state.set_state(ReportsStates.export_period_selection)
+    export_type = callback.data.replace("export_", "")
+    logger.critical(f"Extracted export type: {export_type}")
+    
+    try:
+        current_state = await state.get_state()
+        logger.critical(f"Current FSM state before update: {current_state}")
+        
+        await state.update_data(export_type=export_type)
+        logger.critical("✅ State data updated with export_type")
+        
+        await state.set_state(ReportsStates.export_period_selection)
+        logger.critical("✅ State set to export_period_selection")
+        
+        # Verify state was updated
+        updated_data = await state.get_data()
+        logger.critical(f"Updated state data: {updated_data}")
+        
+    except Exception as e:
+        logger.error(f"❌ ERROR updating state: {e}")
+        await callback.answer(f"❌ Ошибка при обновлении состояния: {e}")
+        return
     
     # Клавиатура с периодами
     keyboard_buttons = [
@@ -1845,24 +1870,63 @@ async def handle_export_type(callback: CallbackQuery, state: FSMContext):
 Выберите период для экспорта:
 """
     
+    logger.critical("🔄 Attempting to edit message with period selection...")
     try:
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+        logger.critical("✅ Message edited successfully with period selection")
     except Exception as e:
         # Ignore "message is not modified" errors when user clicks same button twice
         if "message is not modified" not in str(e).lower():
             logger.warning(f"Failed to edit message: {e}")
-    await callback.answer()
+        else:
+            logger.critical("ℹ️ Message not modified (user clicked same button)")
+    
+    try:
+        await callback.answer()
+        logger.critical("✅ Callback answered successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to answer callback: {e}")
+    
+    logger.critical("🏁 EXPORT TYPE HANDLER COMPLETED")
+    logger.critical("="*80)
 
 
 @router.callback_query(F.data.startswith("export_period_"))
 async def handle_export_period(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора периода для экспорта"""
+    logger.critical("="*80)
+    logger.critical("🎯 EXPORT PERIOD HANDLER TRIGGERED")
+    logger.critical(f"User ID: {callback.from_user.id}")
+    logger.critical(f"Username: {callback.from_user.username}")
+    logger.critical(f"Callback data: {callback.data}")
+    logger.critical(f"Message ID: {callback.message.message_id}")
+    logger.critical(f"Chat ID: {callback.message.chat.id}")
+    
     period = callback.data.replace("export_period_", "")
+    logger.critical(f"Extracted period: {period}")
     
-    user_data = await state.get_data()
-    export_type = user_data.get("export_type")
-    
-    await state.set_state(ReportsStates.export_processing)
+    try:
+        user_data = await state.get_data()
+        logger.critical(f"Current FSM state data: {user_data}")
+        
+        export_type = user_data.get("export_type")
+        logger.critical(f"Export type: {export_type}")
+        
+        if not export_type:
+            logger.error("❌ NO EXPORT TYPE IN STATE DATA!")
+            await callback.answer("❌ Ошибка: тип экспорта не определен. Попробуйте начать заново.")
+            return
+        
+        current_state = await state.get_state()
+        logger.critical(f"Current FSM state: {current_state}")
+        
+        await state.set_state(ReportsStates.export_processing)
+        logger.critical("✅ State set to export_processing")
+        
+    except Exception as e:
+        logger.error(f"❌ ERROR IN EXPORT PERIOD HANDLER SETUP: {e}")
+        await callback.answer(f"❌ Ошибка при обработке: {e}")
+        return
     
     period_names = {
         "today": "Сегодня",
@@ -1873,27 +1937,49 @@ async def handle_export_period(callback: CallbackQuery, state: FSMContext):
         "lastmonth": "Прошлый месяц"
     }
     
-    await callback.message.edit_text(
-        f"⏳ Экспортируем отчет по {export_type} за {period_names.get(period, period)}...\n\n"
-        f"📝 Создаем Google Таблицу...",
-        parse_mode="HTML"
-    )
-    await callback.answer()
+    logger.critical("🔄 Attempting to edit message...")
+    try:
+        await callback.message.edit_text(
+            f"⏳ Экспортируем отчет по {export_type} за {period_names.get(period, period)}...\n\n"
+            f"📝 Создаем Google Таблицу...",
+            parse_mode="HTML"
+        )
+        logger.critical("✅ Message edited successfully")
+    except Exception as e:
+        logger.error(f"❌ Failed to edit message: {e}")
     
     try:
+        await callback.answer()
+        logger.critical("✅ Callback answered")
+    except Exception as e:
+        logger.error(f"❌ Failed to answer callback: {e}")
+    
+    try:
+        logger.critical("📦 Importing GoogleSheetsReportsExporter...")
         from integrations.google.reports_export import GoogleSheetsReportsExporter
+        logger.critical("✅ Import successful")
         
+        logger.critical("🏗️ Creating exporter instance...")
         exporter = GoogleSheetsReportsExporter()
+        logger.critical("✅ Exporter created")
+        
+        logger.critical(f"🚀 Starting export for type: {export_type}, period: {period}")
         
         # Выполняем экспорт в зависимости от типа
         if export_type == "creatives":
+            logger.critical("📊 Calling export_creatives_report...")
             spreadsheet_url = await exporter.export_creatives_report(period)
         elif export_type == "buyers":
+            logger.critical("👥 Calling export_buyers_report...")
             spreadsheet_url = await exporter.export_buyers_report(period)
         elif export_type == "geo":
+            logger.critical("🌍 Calling export_geo_report...")
             spreadsheet_url = await exporter.export_geo_report(period)
         else:
+            logger.error(f"❌ Unsupported export type: {export_type}")
             raise ValueError(f"Неподдерживаемый тип экспорта: {export_type}")
+        
+        logger.critical(f"✅ Export completed successfully! URL: {spreadsheet_url}")
         
         # Успешный экспорт
         success_text = f"""
