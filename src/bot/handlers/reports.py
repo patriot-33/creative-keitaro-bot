@@ -1921,16 +1921,41 @@ async def handle_export_period(callback: CallbackQuery, state: FSMContext):
         
         logger.critical(f"🚀 Starting export for type: {export_type}, period: {period}")
         
-        # Выполняем экспорт в зависимости от типа
+        # ID существующей таблицы для переиспользования (вместо создания новых)
+        from core.config import settings
+        reuse_spreadsheet_id = getattr(settings, 'google_sheets_reuse_spreadsheet_id', None)
+        
+        logger.critical("🔍 CHECKING REUSE CONFIGURATION:")
+        logger.critical(f"   - From settings: {reuse_spreadsheet_id}")
+        
+        # Фолбэк на хардкодированный ID если не настроен
+        if not reuse_spreadsheet_id:
+            reuse_spreadsheet_id = "1gt6kJub1jxt4OxweVA28t-q1Dnr-_2mpeny5GrktNDM"
+            logger.critical(f"🔄 Using FALLBACK spreadsheet ID: {reuse_spreadsheet_id}")
+        else:
+            logger.critical(f"🔄 Using CONFIGURED spreadsheet ID: {reuse_spreadsheet_id}")
+        
+        logger.critical(f"📊 Will reuse spreadsheet: {reuse_spreadsheet_id}")
+        
+        # Выполняем экспорт в зависимости от типа с переиспользованием таблицы
         if export_type == "creatives":
             logger.critical("📊 Calling export_creatives_report...")
-            spreadsheet_url = await exporter.export_creatives_report(period)
+            spreadsheet_url = await exporter.export_creatives_report(
+                period=period, 
+                reuse_spreadsheet_id=reuse_spreadsheet_id
+            )
         elif export_type == "buyers":
             logger.critical("👥 Calling export_buyers_report...")
-            spreadsheet_url = await exporter.export_buyers_report(period)
+            spreadsheet_url = await exporter.export_buyers_report(
+                period=period, 
+                reuse_spreadsheet_id=reuse_spreadsheet_id
+            )
         elif export_type == "geo":
             logger.critical("🌍 Calling export_geo_report...")
-            spreadsheet_url = await exporter.export_geo_report(period)
+            spreadsheet_url = await exporter.export_geo_report(
+                period=period, 
+                reuse_spreadsheet_id=reuse_spreadsheet_id
+            )
         else:
             logger.error(f"❌ Unsupported export type: {export_type}")
             raise ValueError(f"Неподдерживаемый тип экспорта: {export_type}")

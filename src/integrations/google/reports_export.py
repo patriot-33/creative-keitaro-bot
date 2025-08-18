@@ -121,8 +121,29 @@ class GoogleSheetsReportsExporter:
         }
         return source_names.get(traffic_source, traffic_source)
     
-    async def create_or_get_spreadsheet(self, sheet_name: str) -> gspread.Spreadsheet:
-        """Create or get spreadsheet for reports"""
+    async def create_or_get_spreadsheet(self, sheet_name: str, reuse_spreadsheet_id: str = None) -> gspread.Spreadsheet:
+        """Create or get spreadsheet for reports with reuse strategy"""
+        
+        # ПРИОРИТЕТ 1: Если указан ID для переиспользования - используем ТОЛЬКО его
+        if reuse_spreadsheet_id:
+            try:
+                logger.info(f"🔄 Reusing existing spreadsheet with ID: {reuse_spreadsheet_id}")
+                spreadsheet = self.gc.open_by_key(reuse_spreadsheet_id)
+                logger.info(f"✅ Successfully opened reused spreadsheet: '{spreadsheet.title}'")
+                
+                # При переиспользовании НЕ пытаемся создать новую таблицу
+                # Это решает проблему с квотами
+                return spreadsheet
+                
+            except Exception as reuse_error:
+                logger.error(f"❌ Failed to open reused spreadsheet {reuse_spreadsheet_id}: {reuse_error}")
+                error_msg = f"Не удалось открыть таблицу для переиспользования (ID: {reuse_spreadsheet_id}). "
+                error_msg += "Проверьте что таблица существует и расшарена с сервисным аккаунтом."
+                raise ValueError(error_msg)
+        
+        # ПРИОРИТЕТ 2: Только если reuse_spreadsheet_id НЕ указан, пытаемся создать новую
+        logger.warning("⚠️ Режим создания новых таблиц. Это может привести к превышению квот!")
+        
         try:
             # Try to open existing spreadsheet first
             spreadsheet = self.gc.open(sheet_name)
@@ -204,7 +225,8 @@ class GoogleSheetsReportsExporter:
         self,
         period: str,
         traffic_source: str = None,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
+        reuse_spreadsheet_id: str = None
     ) -> str:
         """Export creatives report to Google Sheets in CSV format"""
         logger.info(f"Exporting creatives report: period={period}, traffic_source={traffic_source}")
@@ -247,17 +269,26 @@ class GoogleSheetsReportsExporter:
             if not creatives_data:
                 raise ValueError("Нет данных для экспорта")
             
-            # Create spreadsheet name
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-            period_name = self._format_period_name(period)
-            source_name = self._format_traffic_source(traffic_source) if traffic_source else "все источники"
-            sheet_name = f"Отчет_креативы_{period_name}_{timestamp}"
+            # Create spreadsheet name or use existing one
+            if reuse_spreadsheet_id:
+                # При переиспользовании не добавляем timestamp
+                period_name = self._format_period_name(period)
+                source_name = self._format_traffic_source(traffic_source) if traffic_source else "все источники"
+                sheet_name = f"Отчет_креативы_{period_name}"
+                logger.info(f"🔄 Reusing spreadsheet for: {sheet_name}")
+            else:
+                # При создании новой таблицы добавляем timestamp
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+                period_name = self._format_period_name(period)
+                source_name = self._format_traffic_source(traffic_source) if traffic_source else "все источники"
+                sheet_name = f"Отчет_креативы_{period_name}_{timestamp}"
             
-            # Create/get spreadsheet
-            spreadsheet = await self.create_or_get_spreadsheet(sheet_name)
+            # Create/get spreadsheet with reuse support
+            spreadsheet = await self.create_or_get_spreadsheet(sheet_name, reuse_spreadsheet_id)
             worksheet = spreadsheet.get_worksheet(0)
             
-            # Clear existing content
+            # Clear existing content before writing new data
+            logger.info("🧹 Clearing existing spreadsheet content...")
             worksheet.clear()
             
             # Prepare header info (matching CSV format)
@@ -340,7 +371,8 @@ class GoogleSheetsReportsExporter:
         self,
         period: str,
         traffic_source: str = None,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
+        reuse_spreadsheet_id: str = None
     ) -> str:
         """Export buyers report to Google Sheets"""
         logger.info(f"Exporting buyers report: period={period}, traffic_source={traffic_source}")
@@ -352,17 +384,24 @@ class GoogleSheetsReportsExporter:
             if not buyers_data:
                 raise ValueError("Нет данных для экспорта")
             
-            # Create spreadsheet name
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-            period_name = self._format_period_name(period)
-            source_name = self._format_traffic_source(traffic_source) if traffic_source else "Все источники"
-            sheet_name = f"Байеры_{source_name}_{period_name}_{timestamp}"
+            # Create spreadsheet name or use existing one
+            if reuse_spreadsheet_id:
+                period_name = self._format_period_name(period)
+                source_name = self._format_traffic_source(traffic_source) if traffic_source else "Все источники"
+                sheet_name = f"Байеры_{source_name}_{period_name}"
+                logger.info(f"🔄 Reusing spreadsheet for: {sheet_name}")
+            else:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+                period_name = self._format_period_name(period)
+                source_name = self._format_traffic_source(traffic_source) if traffic_source else "Все источники"
+                sheet_name = f"Байеры_{source_name}_{period_name}_{timestamp}"
             
-            # Create/get spreadsheet
-            spreadsheet = await self.create_or_get_spreadsheet(sheet_name)
+            # Create/get spreadsheet with reuse support
+            spreadsheet = await self.create_or_get_spreadsheet(sheet_name, reuse_spreadsheet_id)
             worksheet = spreadsheet.get_worksheet(0)
             
-            # Clear existing content
+            # Clear existing content before writing new data
+            logger.info("🧹 Clearing existing spreadsheet content...")
             worksheet.clear()
             
             # Prepare headers
@@ -460,7 +499,8 @@ class GoogleSheetsReportsExporter:
         self,
         period: str,
         traffic_source: str = None,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
+        reuse_spreadsheet_id: str = None
     ) -> str:
         """Export GEO report to Google Sheets"""
         logger.info(f"Exporting GEO report: period={period}, traffic_source={traffic_source}")
@@ -472,17 +512,24 @@ class GoogleSheetsReportsExporter:
             if not geo_data:
                 raise ValueError("Нет данных для экспорта")
             
-            # Create spreadsheet name
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-            period_name = self._format_period_name(period)
-            source_name = self._format_traffic_source(traffic_source) if traffic_source else "Все источники"
-            sheet_name = f"ГЕО_{source_name}_{period_name}_{timestamp}"
+            # Create spreadsheet name or use existing one
+            if reuse_spreadsheet_id:
+                period_name = self._format_period_name(period)
+                source_name = self._format_traffic_source(traffic_source) if traffic_source else "Все источники"
+                sheet_name = f"ГЕО_{source_name}_{period_name}"
+                logger.info(f"🔄 Reusing spreadsheet for: {sheet_name}")
+            else:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+                period_name = self._format_period_name(period)
+                source_name = self._format_traffic_source(traffic_source) if traffic_source else "Все источники"
+                sheet_name = f"ГЕО_{source_name}_{period_name}_{timestamp}"
             
-            # Create/get spreadsheet
-            spreadsheet = await self.create_or_get_spreadsheet(sheet_name)
+            # Create/get spreadsheet with reuse support
+            spreadsheet = await self.create_or_get_spreadsheet(sheet_name, reuse_spreadsheet_id)
             worksheet = spreadsheet.get_worksheet(0)
             
-            # Clear existing content
+            # Clear existing content before writing new data
+            logger.info("🧹 Clearing existing spreadsheet content...")
             worksheet.clear()
             
             # Prepare headers

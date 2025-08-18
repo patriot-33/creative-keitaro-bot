@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     google_service_account_json: Optional[str] = None
     google_drive_root_folder_id: Optional[str] = None
     google_sheets_manifest_id: Optional[str] = None
+    google_drive_shared_email: Optional[str] = None
+    google_sheets_reuse_spreadsheet_id: Optional[str] = None
     
     # Google OAuth (optional - deprecated in favor of Telegram storage)
     google_oauth_client_id: Optional[str] = None
