@@ -988,11 +988,14 @@ class KeitaroClient:
     ) -> List[Dict[str, Any]]:
         """Get detailed creatives statistics using raw conversions data
         
-        FIXED: Now uses sub_id_2 (actual creative ID) instead of sub_id_4
+        FIXED: Proper handling of empty sub_id_4 fields:
+        - Uses sub_id_4 as primary creative ID (correct field)
+        - Groups empty/null sub_id_4 as "Неизвестные креативы" instead of skipping
+        - Uses raw conversions/log API for complete data coverage
         
         Returns list of creative stats including:
-        - creative_id (from sub_id_2 - actual creative ID field)
-        - buyer_id (from sub_id_1)
+        - creative_id (from sub_id_4, or "Неизвестные креативы" for empty)
+        - buyer_id (from sub_id_1) 
         - geo/country
         - clicks, unique_clicks, conversions, deposits, revenue
         - uEPC (revenue per unique click)
@@ -1138,16 +1141,16 @@ class KeitaroClient:
             creative_stats = {}
             
             for row in rows_data:
-                # FIXED: Use sub_id_2 as creative_id (not sub_id_4)
-                creative_id = row.get('sub_id_2', '')
+                # FIXED: Use sub_id_4 as primary creative_id (as per user feedback)
+                creative_id = row.get('sub_id_4', '')
                 buyer_id_from_row = row.get('sub_id_1', '')
                 country = row.get('country', '')
                 revenue = float(row.get('revenue', 0))
                 status = row.get('status', '')
                 
-                # Skip empty creative IDs
-                if not creative_id or creative_id.strip() == '':
-                    continue
+                # Handle empty creative IDs - create "Unknown creatives" group instead of skipping
+                if not creative_id or creative_id.strip() == '' or creative_id in ['{sub_id_4}', 'null']:
+                    creative_id = 'Неизвестные креативы'
                     
                 # Initialize creative if not exists
                 if creative_id not in creative_stats:
@@ -1194,7 +1197,7 @@ class KeitaroClient:
             
             logger.info(f"✅ Processed {len(creative_stats)} unique creatives from raw conversions")
             
-            # DIAGNOSTIC: Log TR32 specifically
+            # DIAGNOSTIC: Log TR32 specifically  
             if 'tr32' in creative_stats:
                 tr32_data = creative_stats['tr32']
                 logger.info(f"🎯 TR32 FOUND in conversions:")
@@ -1210,16 +1213,25 @@ class KeitaroClient:
                 # Check for similar creative IDs
                 tr_creatives = [cid for cid in creative_stats.keys() if 'tr' in cid.lower()]
                 logger.info(f"Found TR-related creatives: {tr_creatives}")
+                
+                # Check if TR32 data ended up in "Unknown creatives" group
+                if 'Неизвестные креативы' in creative_stats:
+                    unknown_data = creative_stats['Неизвестные креативы']
+                    logger.info(f"📊 Unknown creatives group stats:")
+                    logger.info(f"  - Total conversions: {len(unknown_data['raw_conversions'])}")
+                    logger.info(f"  - Total revenue: ${unknown_data['revenue']:.2f}")
+                    logger.info(f"  - Deposits: {unknown_data['deposits']}, Leads: {unknown_data['leads']}")
+                    logger.info(f"ℹ️ TR32 data might be in this group if sub_id_4 was empty")
             
             logger.info(f"📊 Total creatives processed: {len(creative_stats)}")
             sample_creatives = list(creative_stats.keys())[:10]
             logger.info(f"📋 Sample creative IDs: {sample_creatives}")
             
             # Now we need to get clicks data to calculate uEPC
-            # Use the report/build API to get clicks for each creative using sub_id_2
+            # Use the report/build API to get clicks for each creative using sub_id_4
             clicks_payload = {
                 'metrics': ['clicks', 'unique_clicks'],
-                'columns': ['sub_id_2', 'sub_id_1'],
+                'columns': ['sub_id_4', 'sub_id_1'],
                 'filters': [
                     {
                         'name': 'datetime',
@@ -1227,7 +1239,7 @@ class KeitaroClient:
                         'expression': [start_date, end_date]
                     }
                 ],
-                'grouping': ['sub_id_2', 'sub_id_1'],
+                'grouping': ['sub_id_4', 'sub_id_1'],
                 'sort': [{'name': 'clicks', 'order': 'DESC'}],
                 'limit': 10000
             }
@@ -1263,9 +1275,10 @@ class KeitaroClient:
                 logger.info(f"✅ Found {len(clicks_rows)} clicks records")
                 
                 for row in clicks_rows:
-                    creative_id = row.get('sub_id_2', '')
-                    if not creative_id or creative_id.strip() == '':
-                        continue
+                    creative_id = row.get('sub_id_4', '')
+                    # Handle empty creative IDs same way as conversions
+                    if not creative_id or creative_id.strip() == '' or creative_id in ['{sub_id_4}', 'null']:
+                        creative_id = 'Неизвестные креативы'
                         
                     if creative_id in creative_stats:
                         creative_stats[creative_id]['unique_clicks'] = int(row.get('unique_clicks', 0))
