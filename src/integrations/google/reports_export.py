@@ -21,6 +21,7 @@ class GoogleSheetsReportsExporter:
         self.credentials = self._get_credentials()
         self.gc = gspread.authorize(self.credentials)
         self.reports_service = ReportsService()
+        self._check_drive_status()
     
     def _get_credentials(self) -> Credentials:
         """Get Google service account credentials"""
@@ -33,6 +34,71 @@ class GoogleSheetsReportsExporter:
             ]
         )
         return credentials
+    
+    def _check_drive_status(self):
+        """Check Google Drive status and file count"""
+        try:
+            # Get list of spreadsheets to check how many we have
+            spreadsheets = self.gc.openall()
+            file_count = len(spreadsheets)
+            logger.info(f"📊 Google Drive status: {file_count} spreadsheets found")
+            
+            if file_count > 90:
+                logger.warning(f"⚠️  High number of spreadsheets ({file_count}). Consider cleaning up old files.")
+            elif file_count > 95:
+                logger.error(f"🚨 Very high number of spreadsheets ({file_count}). You may hit Google Drive limits soon!")
+                
+        except Exception as e:
+            logger.warning(f"⚠️  Could not check Drive status: {e}")
+    
+    def diagnose_google_drive_access(self):
+        """Diagnose Google Drive access and quotas"""
+        try:
+            logger.info("🔍 Diagnosing Google Drive access...")
+            
+            # Test basic API access
+            try:
+                spreadsheets = self.gc.openall()
+                logger.info(f"✅ Google Drive API access working. Found {len(spreadsheets)} spreadsheets.")
+                
+                # Check if we can create a test spreadsheet
+                try:
+                    test_name = f"__TEST_QUOTA_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    logger.info(f"🧪 Testing spreadsheet creation with name: {test_name}")
+                    test_sheet = self.gc.create(test_name)
+                    logger.info("✅ Test spreadsheet creation successful!")
+                    
+                    # Clean up test spreadsheet
+                    try:
+                        self.gc.del_spreadsheet(test_sheet.id)
+                        logger.info("🧹 Test spreadsheet cleaned up")
+                    except:
+                        logger.warning("⚠️  Could not clean up test spreadsheet")
+                        
+                    return True
+                    
+                except Exception as create_test_error:
+                    error_str = str(create_test_error).lower()
+                    logger.error(f"❌ Test spreadsheet creation failed: {create_test_error}")
+                    
+                    if 'quota' in error_str:
+                        logger.error("🔥 QUOTA LIMIT DETECTED!")
+                        if 'storage' in error_str:
+                            logger.error("💾 Storage quota exceeded")
+                        elif 'api' in error_str or 'requests' in error_str:
+                            logger.error("🔥 API request quota exceeded") 
+                        else:
+                            logger.error("📊 Other quota limit")
+                    
+                    return False
+                    
+            except Exception as api_error:
+                logger.error(f"❌ Google Drive API access failed: {api_error}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Diagnosis failed: {e}")
+            return False
     
     def _format_period_name(self, period: str) -> str:
         """Format period name for display"""
@@ -58,18 +124,79 @@ class GoogleSheetsReportsExporter:
     async def create_or_get_spreadsheet(self, sheet_name: str) -> gspread.Spreadsheet:
         """Create or get spreadsheet for reports"""
         try:
-            # Try to open existing spreadsheet
+            # Try to open existing spreadsheet first
             spreadsheet = self.gc.open(sheet_name)
             logger.info(f"Opened existing spreadsheet: {sheet_name}")
         except gspread.SpreadsheetNotFound:
-            # Create new spreadsheet
-            spreadsheet = self.gc.create(sheet_name)
-            logger.info(f"Created new spreadsheet: {sheet_name}")
-            
-            # Share with the configured email if available
-            if hasattr(settings, 'google_drive_shared_email') and settings.google_drive_shared_email:
-                spreadsheet.share(settings.google_drive_shared_email, perm_type='user', role='writer')
-                logger.info(f"Shared spreadsheet with: {settings.google_drive_shared_email}")
+            try:
+                # Create new spreadsheet
+                logger.info(f"Creating new spreadsheet: {sheet_name}")
+                spreadsheet = self.gc.create(sheet_name)
+                logger.info(f"✅ Created new spreadsheet successfully: {sheet_name}")
+                
+                # Share with the configured email if available
+                if hasattr(settings, 'google_drive_shared_email') and settings.google_drive_shared_email:
+                    try:
+                        spreadsheet.share(settings.google_drive_shared_email, perm_type='user', role='writer')
+                        logger.info(f"✅ Shared spreadsheet with: {settings.google_drive_shared_email}")
+                    except Exception as share_error:
+                        logger.warning(f"⚠️  Failed to share spreadsheet: {share_error}")
+                        # Continue without sharing
+                        
+            except Exception as create_error:
+                logger.error(f"❌ Failed to create spreadsheet '{sheet_name}': {create_error}")
+                
+                # Enhanced error analysis
+                error_str = str(create_error).lower()
+                if 'quota' in error_str:
+                    if 'storage' in error_str:
+                        logger.error("💾 This appears to be a Google Drive STORAGE quota issue")
+                        logger.error("📋 Possible solutions:")
+                        logger.error("  1. Check Google Drive free space")
+                        logger.error("  2. Delete old spreadsheets")  
+                        logger.error("  3. Empty Google Drive trash")
+                        raise ValueError("Превышена квота хранилища Google Drive. Освободите место в Drive или обратитесь к администратору.")
+                    elif 'api' in error_str or 'requests' in error_str:
+                        logger.error("🔥 This appears to be a Google Drive/Sheets API quota limit")
+                        logger.error("📋 Possible solutions:")
+                        logger.error("  1. Wait for API quota to reset (usually 24 hours)")
+                        logger.error("  2. Reduce number of export requests")
+                        logger.error("  3. Use service account with higher quotas")
+                        raise ValueError("Превышена квота API Google Drive/Sheets. Попробуйте позже или обратитесь к администратору.")
+                    else:
+                        logger.error("📊 This appears to be some other Google quota limit")
+                        logger.error("  Error details: " + str(create_error))
+                        raise ValueError("Превышена квота Google Services. Попробуйте позже или обратитесь к администратору.")
+                elif 'permission' in error_str or 'access' in error_str:
+                    logger.error("🔐 This appears to be a permissions/access issue")
+                    logger.error("📋 Possible solutions:")
+                    logger.error("  1. Check service account permissions")
+                    logger.error("  2. Verify Google Drive API is enabled")
+                    logger.error("  3. Check if service account has Drive access")
+                    raise ValueError("Проблема с доступом к Google Drive. Проверьте настройки или обратитесь к администратору.")
+                else:
+                    logger.error(f"❓ Unknown Google Drive error: {create_error}")
+                    
+                    # Try fallback: reuse an existing spreadsheet
+                    logger.warning("🔄 Attempting fallback: searching for existing spreadsheets to reuse...")
+                    try:
+                        existing_sheets = self.gc.openall()
+                        if existing_sheets:
+                            # Find the most recent spreadsheet with a similar name pattern
+                            report_sheets = [s for s in existing_sheets if any(keyword in s.title.lower() 
+                                           for keyword in ['отчет', 'креативы', 'байеры', 'гео', 'report'])]
+                            if report_sheets:
+                                # Use the most recently created one
+                                fallback_sheet = sorted(report_sheets, key=lambda s: s.creationTime, reverse=True)[0]
+                                logger.warning(f"🔄 Using existing spreadsheet as fallback: {fallback_sheet.title}")
+                                return fallback_sheet
+                        
+                        # If no suitable fallback found, raise the original error
+                        raise ValueError(f"Ошибка при создании Google Sheets: {create_error}")
+                        
+                    except Exception as fallback_error:
+                        logger.error(f"❌ Fallback also failed: {fallback_error}")
+                        raise ValueError(f"Ошибка при создании Google Sheets: {create_error}")
         
         return spreadsheet
     

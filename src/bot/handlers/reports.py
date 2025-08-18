@@ -1970,6 +1970,16 @@ async def handle_export_period(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logger.error(f"Export error: {e}")
         
+        # Run diagnosis to understand the issue better
+        try:
+            logger.info("🔍 Running Google Drive diagnosis after export error...")
+            from integrations.google.reports_export import GoogleSheetsReportsExporter
+            diagnostic_exporter = GoogleSheetsReportsExporter()
+            diagnosis_result = diagnostic_exporter.diagnose_google_drive_access()
+            logger.info(f"🔬 Diagnosis result: {diagnosis_result}")
+        except Exception as diag_error:
+            logger.error(f"❌ Diagnosis failed: {diag_error}")
+        
         error_text = f"""
 ❌ <b>Ошибка при экспорте</b>
 
