@@ -1254,16 +1254,16 @@ class KeitaroClient:
             
             # Now we need to get clicks data to calculate uEPC
             # Use the report/build API to get clicks for each creative using sub_id_4
+            # FIXED: Use 'range' parameter instead of 'datetime' filter to match timezone fix
             clicks_payload = {
                 'metrics': ['clicks', 'unique_clicks'],
                 'columns': ['sub_id_4', 'sub_id_1'],
-                'filters': [
-                    {
-                        'name': 'datetime',
-                        'operator': 'BETWEEN',
-                        'expression': [start_date, end_date]
-                    }
-                ],
+                'filters': [],  # Other filters will be added below
+                'range': {
+                    'from': start_date,
+                    'to': end_date,
+                    'timezone': 'Europe/Moscow'  # Handle Moscow time correctly
+                },
                 'grouping': ['sub_id_4', 'sub_id_1'],
                 'sort': [{'name': 'clicks', 'order': 'DESC'}],
                 'limit': 10000
@@ -1301,6 +1301,7 @@ class KeitaroClient:
                 logger.info(f"🔥 APPLIED CLICKS FILTER: Excluding Google sources {google_source_ids}")
             
             logger.info(f"🔄 Getting clicks data (FB traffic only)...")
+            logger.info(f"🕐 CLICKS FIX: Using range parameter with Moscow timezone: {start_date} - {end_date}")
             clicks_data = await self._make_request('/admin_api/v1/report/build', method='POST', json=clicks_payload)
             
             # Add clicks data to creative stats
