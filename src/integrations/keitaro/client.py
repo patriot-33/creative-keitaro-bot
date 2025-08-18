@@ -1259,7 +1259,7 @@ class KeitaroClient:
             
             # === REQUEST 1: Clicks for known creatives (non-empty sub_id_4) ===
             clicks_known_payload = {
-                'metrics': ['unique_clicks'],
+                'metrics': ['stream_unique_clicks'],
                 'columns': ['sub_id_4', 'sub_id_1'],
                 'filters': [
                     # Include only non-empty sub_id_4 values
@@ -1273,13 +1273,13 @@ class KeitaroClient:
                     'timezone': 'Europe/Moscow'
                 },
                 'grouping': ['sub_id_4', 'sub_id_1'],
-                'sort': [{'name': 'unique_clicks', 'order': 'DESC'}],
+                'sort': [{'name': 'stream_unique_clicks', 'order': 'DESC'}],
                 'limit': 10000
             }
             
             # === REQUEST 2: Total clicks (no grouping) ===
             clicks_total_payload = {
-                'metrics': ['unique_clicks'],
+                'metrics': ['stream_unique_clicks'],
                 'columns': [],
                 'filters': [],
                 'range': {
@@ -1360,7 +1360,7 @@ class KeitaroClient:
             if clicks_total_data and ('rows' in clicks_total_data or isinstance(clicks_total_data, list)):
                 total_rows = clicks_total_data if isinstance(clicks_total_data, list) else clicks_total_data.get('rows', [])
                 if total_rows:
-                    total_unique_clicks = int(total_rows[0].get('unique_clicks', 0))
+                    total_unique_clicks = int(total_rows[0].get('stream_unique_clicks', 0))
                     logger.info(f"📊 Total unique clicks (all creatives): {total_unique_clicks}")
                 else:
                     logger.warning("No total clicks data received")
@@ -1374,7 +1374,7 @@ class KeitaroClient:
                 
                 for row in known_rows:
                     creative_id = row.get('sub_id_4', '')
-                    unique_clicks = int(row.get('unique_clicks', 0))
+                    unique_clicks = int(row.get('stream_unique_clicks', 0))
                     
                     # Skip empty creative IDs in known creatives data
                     if not creative_id or creative_id.strip() == '' or creative_id in ['{sub_id_4}', 'null']:
