@@ -1253,39 +1253,76 @@ class KeitaroClient:
             logger.info(f"📋 Sample creative IDs: {sample_creatives}")
             
             # Now we need to get clicks data to calculate uEPC
-            # Use the report/build API to get clicks for each creative using sub_id_4
-            # FIXED: Use 'range' parameter instead of 'datetime' filter to match timezone fix
-            clicks_payload = {
-                'metrics': ['clicks', 'unique_clicks'],
+            # FIXED: Use double-request approach to get EXACT unique clicks for all creatives
+            # Problem: report/build API excludes records with empty grouping fields (sub_id_4)
+            # Solution: Request 1 gets known creatives, Request 2 gets total, calculate unknown mathematically
+            
+            # === REQUEST 1: Clicks for known creatives (non-empty sub_id_4) ===
+            clicks_known_payload = {
+                'metrics': ['unique_clicks'],
                 'columns': ['sub_id_4', 'sub_id_1'],
-                'filters': [],  # Other filters will be added below
+                'filters': [
+                    # Include only non-empty sub_id_4 values
+                    {'name': 'sub_id_4', 'operator': 'NOT_EQUAL', 'expression': ''},
+                    {'name': 'sub_id_4', 'operator': 'NOT_EQUAL', 'expression': '{sub_id_4}'},
+                    {'name': 'sub_id_4', 'operator': 'NOT_EQUAL', 'expression': 'null'}
+                ],
                 'range': {
                     'from': start_date,
                     'to': end_date,
-                    'timezone': 'Europe/Moscow'  # Handle Moscow time correctly
+                    'timezone': 'Europe/Moscow'
                 },
                 'grouping': ['sub_id_4', 'sub_id_1'],
-                'sort': [{'name': 'clicks', 'order': 'DESC'}],
+                'sort': [{'name': 'unique_clicks', 'order': 'DESC'}],
                 'limit': 10000
             }
             
-            # Add same filters as conversions request
+            # === REQUEST 2: Total clicks (no grouping) ===
+            clicks_total_payload = {
+                'metrics': ['unique_clicks'],
+                'columns': [],
+                'filters': [],
+                'range': {
+                    'from': start_date,
+                    'to': end_date,
+                    'timezone': 'Europe/Moscow'
+                },
+                'grouping': [],  # No grouping to get total
+                'limit': 1
+            }
+            
+            # Add same filters to both requests
             if buyer_id:
-                clicks_payload['filters'].append({
+                clicks_known_payload['filters'].append({
+                    'name': 'sub_id_1',
+                    'operator': 'EQUALS',
+                    'expression': buyer_id
+                })
+                clicks_total_payload['filters'].append({
                     'name': 'sub_id_1',
                     'operator': 'EQUALS',
                     'expression': buyer_id
                 })
             
             if geo:
-                clicks_payload['filters'].append({
+                clicks_known_payload['filters'].append({
+                    'name': 'country',
+                    'operator': 'EQUALS',
+                    'expression': geo
+                })
+                clicks_total_payload['filters'].append({
                     'name': 'country',
                     'operator': 'EQUALS',
                     'expression': geo
                 })
             
             if traffic_source_ids:
-                clicks_payload['filters'].append({
+                clicks_known_payload['filters'].append({
+                    'name': 'ts_id',
+                    'operator': 'IN_LIST',
+                    'expression': traffic_source_ids
+                })
+                clicks_total_payload['filters'].append({
                     'name': 'ts_id',
                     'operator': 'IN_LIST',
                     'expression': traffic_source_ids
@@ -1293,33 +1330,78 @@ class KeitaroClient:
             
             # CRITICAL: Add same Google exclusion filter for clicks data
             if google_source_ids:
-                clicks_payload['filters'].append({
+                clicks_known_payload['filters'].append({
                     'name': 'ts_id',
-                    'operator': 'NOT_IN_LIST',  # Exclude Google sources
+                    'operator': 'NOT_IN_LIST',
+                    'expression': google_source_ids
+                })
+                clicks_total_payload['filters'].append({
+                    'name': 'ts_id',
+                    'operator': 'NOT_IN_LIST',
                     'expression': google_source_ids
                 })
                 logger.info(f"🔥 APPLIED CLICKS FILTER: Excluding Google sources {google_source_ids}")
             
-            logger.info(f"🔄 Getting clicks data (FB traffic only)...")
+            logger.info(f"🔄 Getting clicks data with double-request approach...")
             logger.info(f"🕐 CLICKS FIX: Using range parameter with Moscow timezone: {start_date} - {end_date}")
-            clicks_data = await self._make_request('/admin_api/v1/report/build', method='POST', json=clicks_payload)
             
-            # Add clicks data to creative stats
-            if clicks_data and ('rows' in clicks_data or isinstance(clicks_data, list)):
-                clicks_rows = clicks_data if isinstance(clicks_data, list) else clicks_data.get('rows', [])
-                logger.info(f"✅ Found {len(clicks_rows)} clicks records")
+            # Execute both requests
+            logger.info(f"📊 REQUEST 1: Getting known creatives clicks...")
+            clicks_known_data = await self._make_request('/admin_api/v1/report/build', method='POST', json=clicks_known_payload)
+            
+            logger.info(f"📊 REQUEST 2: Getting total clicks...")
+            clicks_total_data = await self._make_request('/admin_api/v1/report/build', method='POST', json=clicks_total_payload)
+            
+            # Process double-request results to get exact clicks for all creatives
+            total_unique_clicks = 0
+            known_creatives_clicks = 0
+            
+            # Process REQUEST 2 result - get total clicks
+            if clicks_total_data and ('rows' in clicks_total_data or isinstance(clicks_total_data, list)):
+                total_rows = clicks_total_data if isinstance(clicks_total_data, list) else clicks_total_data.get('rows', [])
+                if total_rows:
+                    total_unique_clicks = int(total_rows[0].get('unique_clicks', 0))
+                    logger.info(f"📊 Total unique clicks (all creatives): {total_unique_clicks}")
+                else:
+                    logger.warning("No total clicks data received")
+            else:
+                logger.warning("No total clicks data received")
+            
+            # Process REQUEST 1 result - get clicks for known creatives
+            if clicks_known_data and ('rows' in clicks_known_data or isinstance(clicks_known_data, list)):
+                known_rows = clicks_known_data if isinstance(clicks_known_data, list) else clicks_known_data.get('rows', [])
+                logger.info(f"✅ Found {len(known_rows)} known creative clicks records")
                 
-                for row in clicks_rows:
+                for row in known_rows:
                     creative_id = row.get('sub_id_4', '')
-                    # Handle empty creative IDs same way as conversions
+                    unique_clicks = int(row.get('unique_clicks', 0))
+                    
+                    # Skip empty creative IDs in known creatives data
                     if not creative_id or creative_id.strip() == '' or creative_id in ['{sub_id_4}', 'null']:
-                        creative_id = 'Неизвестные креативы'
+                        continue
                         
                     if creative_id in creative_stats:
-                        creative_stats[creative_id]['unique_clicks'] = int(row.get('unique_clicks', 0))
-                        # Note: We don't update buyer_id from clicks data since conversions data is more accurate
+                        creative_stats[creative_id]['unique_clicks'] = unique_clicks
+                        known_creatives_clicks += unique_clicks
+                        logger.debug(f"  {creative_id}: {unique_clicks} clicks")
+                
+                logger.info(f"📊 Known creatives total clicks: {known_creatives_clicks}")
             else:
-                logger.warning("No clicks data received")
+                logger.warning("No known creatives clicks data received")
+            
+            # Calculate clicks for "Неизвестные креативы" mathematically
+            unknown_creatives_clicks = total_unique_clicks - known_creatives_clicks
+            if unknown_creatives_clicks > 0 and 'Неизвестные креативы' in creative_stats:
+                creative_stats['Неизвестные креативы']['unique_clicks'] = unknown_creatives_clicks
+                logger.info(f"🧮 Calculated 'Неизвестные креативы' clicks: {unknown_creatives_clicks} = {total_unique_clicks} - {known_creatives_clicks}")
+            elif unknown_creatives_clicks < 0:
+                logger.warning(f"⚠️ Negative unknown clicks calculated: {unknown_creatives_clicks}. Setting to 0.")
+                if 'Неизвестные креативы' in creative_stats:
+                    creative_stats['Неизвестные креативы']['unique_clicks'] = 0
+            
+            # Log summary of clicks assignment
+            clicks_assigned = sum(stats.get('unique_clicks', 0) for stats in creative_stats.values())
+            logger.info(f"📊 CLICKS SUMMARY: Total={total_unique_clicks}, Assigned={clicks_assigned}, Match={clicks_assigned == total_unique_clicks}")
             
             # Convert creative_stats to final result format
             result = []
