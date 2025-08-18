@@ -1845,7 +1845,12 @@ async def handle_export_type(callback: CallbackQuery, state: FSMContext):
 Выберите период для экспорта:
 """
     
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception as e:
+        # Ignore "message is not modified" errors when user clicks same button twice
+        if "message is not modified" not in str(e).lower():
+            logger.warning(f"Failed to edit message: {e}")
     await callback.answer()
 
 
@@ -1908,12 +1913,17 @@ async def handle_export_period(callback: CallbackQuery, state: FSMContext):
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
         
-        await callback.message.edit_text(
-            success_text,
-            reply_markup=keyboard,
-            parse_mode="HTML",
-            disable_web_page_preview=True
-        )
+        try:
+            await callback.message.edit_text(
+                success_text,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
+        except Exception as e:
+            # Ignore "message is not modified" errors
+            if "message is not modified" not in str(e).lower():
+                logger.warning(f"Failed to edit success message: {e}")
         
     except Exception as e:
         logger.error(f"Export error: {e}")
@@ -1936,11 +1946,16 @@ async def handle_export_period(callback: CallbackQuery, state: FSMContext):
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
         
-        await callback.message.edit_text(
-            error_text,
-            reply_markup=keyboard,
-            parse_mode="HTML"
-        )
+        try:
+            await callback.message.edit_text(
+                error_text,
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            # Ignore "message is not modified" errors
+            if "message is not modified" not in str(e).lower():
+                logger.warning(f"Failed to edit error message: {e}")
 
 
 @router.callback_query(F.data == "export_new")
@@ -1968,7 +1983,12 @@ async def handle_export_back_to_types(callback: CallbackQuery, state: FSMContext
 Выберите тип отчета для экспорта:
 """
     
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception as e:
+        # Ignore "message is not modified" errors when user clicks same button twice
+        if "message is not modified" not in str(e).lower():
+            logger.warning(f"Failed to edit message: {e}")
     await callback.answer()
 
 
