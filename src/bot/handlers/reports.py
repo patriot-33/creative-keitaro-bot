@@ -38,6 +38,9 @@ class ReportsStates(StatesGroup):
     period_selection = State()
     filters_selection = State()
     report_display = State()
+    export_type_selection = State()
+    export_period_selection = State()
+    export_processing = State()
 
 
 @router.message(Command("reports"))
@@ -802,18 +805,30 @@ async def cmd_stats_buyer(message: Message):
 
 
 @router.message(Command("export"))
-async def cmd_export(message: Message):
-    """Экспорт данных в Excel"""
-    await message.answer(
-        "📊 <b>Экспорт в Excel</b>\n\n"
-        "🚧 Функция в разработке\n\n"
-        "Будет доступен экспорт:\n"
-        "• Отчетов по байерам\n"
-        "• Статистики креативов\n"
-        "• Данных по GEO/офферам\n"
-        "• Сводных отчетов",
-        parse_mode="HTML"
-    )
+async def cmd_export(message: Message, state: FSMContext):
+    """Экспорт отчетов в Google Таблицы"""
+    await state.set_state(ReportsStates.export_type_selection)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Креативы", callback_data="export_creatives")],
+        [InlineKeyboardButton(text="👥 Байеры", callback_data="export_buyers")],
+        [InlineKeyboardButton(text="🌍 ГЕО", callback_data="export_geo")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data="reports_cancel")]
+    ])
+    
+    text = """
+📊 <b>Экспорт в Google Таблицы</b>
+
+🎯 <b>Выберите тип отчета для экспорта:</b>
+
+📊 <b>Креативы</b> - статистика по креативам с анализом успешности
+👥 <b>Байеры</b> - отчет по медиабаерам с метриками эффективности  
+🌍 <b>ГЕО</b> - анализ по географическим регионам
+
+💡 <b>Отчет будет создан в Google Таблицах со ссылкой для доступа</b>
+"""
+    
+    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 # ===== ОТЧЕТЫ ПО КРЕАТИВАМ (продолжение) =====
@@ -1754,4 +1769,247 @@ async def handle_main_menu(callback: CallbackQuery, state: FSMContext):
     # keyboard = MainMenuKeyboards.main_menu()
     
     await callback.message.edit_text(text, parse_mode="HTML")
+    await callback.answer()
+
+
+# ===== ЭКСПОРТ В GOOGLE SHEETS =====
+
+@router.message(Command("export"))
+async def cmd_export(message: Message, state: FSMContext):
+    """Экспорт отчетов в Google Таблицы"""
+    user = message.from_user
+    
+    # Проверка доступа
+    allowed_users = settings.allowed_users
+    user_info = allowed_users.get(user.id) or allowed_users.get(str(user.id))
+    
+    if not user_info:
+        await message.answer("❌ У вас нет доступа к экспорту отчетов.")
+        return
+    
+    await state.set_state(ReportsStates.export_type_selection)
+    
+    keyboard_buttons = [
+        [InlineKeyboardButton(text="🎨 Креативы", callback_data="export_creatives")],
+        [InlineKeyboardButton(text="👥 Байеры", callback_data="export_buyers")],
+        [InlineKeyboardButton(text="🌍 ГЕО", callback_data="export_geo")]
+    ]
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    text = """
+📊 <b>Экспорт отчетов в Google Таблицы</b>
+
+Выберите тип отчета для экспорта:
+"""
+    
+    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("export_"))
+async def handle_export_type(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора типа экспорта"""
+    export_type = callback.data.replace("export_", "")
+    
+    await state.update_data(export_type=export_type)
+    await state.set_state(ReportsStates.export_period_selection)
+    
+    # Клавиатура с периодами
+    keyboard_buttons = [
+        [
+            InlineKeyboardButton(text="📅 Сегодня", callback_data="export_period_today"),
+            InlineKeyboardButton(text="📅 Вчера", callback_data="export_period_yesterday")
+        ],
+        [
+            InlineKeyboardButton(text="📅 Последние 3 дня", callback_data="export_period_last3days"),
+            InlineKeyboardButton(text="📅 Последние 7 дней", callback_data="export_period_last7days")
+        ],
+        [
+            InlineKeyboardButton(text="📅 Этот месяц", callback_data="export_period_thismonth"),
+            InlineKeyboardButton(text="📅 Прошлый месяц", callback_data="export_period_lastmonth")
+        ],
+        [InlineKeyboardButton(text="↩️ Назад", callback_data="export_back_to_types")]
+    ]
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    export_names = {
+        "creatives": "Креативы",
+        "buyers": "Байеры", 
+        "geo": "ГЕО"
+    }
+    
+    text = f"""
+📊 <b>Экспорт: {export_names.get(export_type, export_type)}</b>
+
+Выберите период для экспорта:
+"""
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("export_period_"))
+async def handle_export_period(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбора периода для экспорта"""
+    period = callback.data.replace("export_period_", "")
+    
+    user_data = await state.get_data()
+    export_type = user_data.get("export_type")
+    
+    await state.set_state(ReportsStates.export_processing)
+    
+    period_names = {
+        "today": "Сегодня",
+        "yesterday": "Вчера", 
+        "last3days": "Последние 3 дня",
+        "last7days": "Последние 7 дней",
+        "thismonth": "Этот месяц",
+        "lastmonth": "Прошлый месяц"
+    }
+    
+    await callback.message.edit_text(
+        f"⏳ Экспортируем отчет по {export_type} за {period_names.get(period, period)}...\n\n"
+        f"📝 Создаем Google Таблицу...",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+    
+    try:
+        from integrations.google.reports_export import GoogleSheetsReportsExporter
+        
+        exporter = GoogleSheetsReportsExporter()
+        
+        # Выполняем экспорт в зависимости от типа
+        if export_type == "creatives":
+            spreadsheet_url = await exporter.export_creatives_report(period)
+        elif export_type == "buyers":
+            spreadsheet_url = await exporter.export_buyers_report(period)
+        elif export_type == "geo":
+            spreadsheet_url = await exporter.export_geo_report(period)
+        else:
+            raise ValueError(f"Неподдерживаемый тип экспорта: {export_type}")
+        
+        # Успешный экспорт
+        success_text = f"""
+✅ <b>Экспорт завершен успешно!</b>
+
+📊 <b>Тип:</b> {export_type}
+📅 <b>Период:</b> {period_names.get(period, period)}
+🔗 <b>Ссылка:</b> <a href="{spreadsheet_url}">Открыть таблицу</a>
+
+💡 Таблица была создана в Google Drive и готова к использованию.
+"""
+        
+        keyboard_buttons = [
+            [InlineKeyboardButton(text="🔄 Новый экспорт", callback_data="export_new")],
+            [InlineKeyboardButton(text="📊 К отчетам", callback_data="reports_main")]
+        ]
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        
+        await callback.message.edit_text(
+            success_text,
+            reply_markup=keyboard,
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+        
+    except Exception as e:
+        logger.error(f"Export error: {e}")
+        
+        error_text = f"""
+❌ <b>Ошибка при экспорте</b>
+
+📊 <b>Тип:</b> {export_type}
+📅 <b>Период:</b> {period_names.get(period, period)}
+🐛 <b>Ошибка:</b> {str(e)[:200]}
+
+🔄 Попробуйте еще раз или выберите другой период.
+"""
+        
+        keyboard_buttons = [
+            [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data=f"export_period_{period}")],
+            [InlineKeyboardButton(text="↩️ К выбору периода", callback_data="export_back_to_period")],
+            [InlineKeyboardButton(text="📊 К отчетам", callback_data="reports_main")]
+        ]
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        
+        await callback.message.edit_text(
+            error_text,
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+
+
+@router.callback_query(F.data == "export_new")
+async def handle_export_new(callback: CallbackQuery, state: FSMContext):
+    """Начать новый экспорт"""
+    await cmd_export(callback.message, state)
+
+
+@router.callback_query(F.data == "export_back_to_types")  
+async def handle_export_back_to_types(callback: CallbackQuery, state: FSMContext):
+    """Возврат к выбору типа экспорта"""
+    await state.set_state(ReportsStates.export_type_selection)
+    
+    keyboard_buttons = [
+        [InlineKeyboardButton(text="🎨 Креативы", callback_data="export_creatives")],
+        [InlineKeyboardButton(text="👥 Байеры", callback_data="export_buyers")],
+        [InlineKeyboardButton(text="🌍 ГЕО", callback_data="export_geo")]
+    ]
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    text = """
+📊 <b>Экспорт отчетов в Google Таблицы</b>
+
+Выберите тип отчета для экспорта:
+"""
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "export_back_to_period")
+async def handle_export_back_to_period(callback: CallbackQuery, state: FSMContext):
+    """Возврат к выбору периода экспорта"""
+    user_data = await state.get_data()
+    export_type = user_data.get("export_type", "creatives")
+    
+    await state.set_state(ReportsStates.export_period_selection)
+    
+    # Клавиатура с периодами  
+    keyboard_buttons = [
+        [
+            InlineKeyboardButton(text="📅 Сегодня", callback_data="export_period_today"),
+            InlineKeyboardButton(text="📅 Вчера", callback_data="export_period_yesterday")
+        ],
+        [
+            InlineKeyboardButton(text="📅 Последние 3 дня", callback_data="export_period_last3days"),
+            InlineKeyboardButton(text="📅 Последние 7 дней", callback_data="export_period_last7days")
+        ],
+        [
+            InlineKeyboardButton(text="📅 Этот месяц", callback_data="export_period_thismonth"),
+            InlineKeyboardButton(text="📅 Прошлый месяц", callback_data="export_period_lastmonth")
+        ],
+        [InlineKeyboardButton(text="↩️ Назад", callback_data="export_back_to_types")]
+    ]
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+    
+    export_names = {
+        "creatives": "Креативы",
+        "buyers": "Байеры",
+        "geo": "ГЕО"
+    }
+    
+    text = f"""
+📊 <b>Экспорт: {export_names.get(export_type, export_type)}</b>
+
+Выберите период для экспорта:
+"""
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
