@@ -1118,7 +1118,35 @@ class KeitaroClient:
                     'expression': traffic_source_ids
                 })
             
-            logger.info(f"🔄 Getting raw conversions data...")
+            # CRITICAL FIX: Add filter to exclude Google traffic (only FB traffic)
+            # Get traffic sources to identify Google source ID
+            traffic_sources = await self.get_traffic_sources()
+            google_source_ids = []
+            fb_source_ids = []
+            
+            for ts in traffic_sources:
+                ts_name = ts.get('name', '').lower()
+                ts_id = str(ts.get('id', ''))
+                
+                if 'google' in ts_name or 'goog' in ts_name:
+                    google_source_ids.append(ts_id)
+                    logger.info(f"🚫 Excluding Google traffic source: {ts['name']} (ID: {ts_id})")
+                elif 'facebook' in ts_name or 'fb' in ts_name:
+                    fb_source_ids.append(ts_id)
+                    logger.info(f"✅ Including FB traffic source: {ts['name']} (ID: {ts_id})")
+            
+            # Add filter to EXCLUDE Google traffic sources
+            if google_source_ids:
+                payload['filters'].append({
+                    'name': 'ts_id',
+                    'operator': 'NOT_IN_LIST',  # Exclude Google sources
+                    'expression': google_source_ids
+                })
+                logger.info(f"🔥 APPLIED FILTER: Excluding Google sources {google_source_ids}")
+            else:
+                logger.warning("⚠️ No Google traffic sources found - filter not applied")
+            
+            logger.info(f"🔄 Getting raw conversions data (FB traffic only)...")
             logger.info(f"Request payload: {payload}")
             
             # Get raw conversions data (same as CSV source)
@@ -1266,7 +1294,16 @@ class KeitaroClient:
                     'expression': traffic_source_ids
                 })
             
-            logger.info(f"🔄 Getting clicks data...")
+            # CRITICAL: Add same Google exclusion filter for clicks data
+            if google_source_ids:
+                clicks_payload['filters'].append({
+                    'name': 'ts_id',
+                    'operator': 'NOT_IN_LIST',  # Exclude Google sources
+                    'expression': google_source_ids
+                })
+                logger.info(f"🔥 APPLIED CLICKS FILTER: Excluding Google sources {google_source_ids}")
+            
+            logger.info(f"🔄 Getting clicks data (FB traffic only)...")
             clicks_data = await self._make_request('/admin_api/v1/report/build', method='POST', json=clicks_payload)
             
             # Add clicks data to creative stats
