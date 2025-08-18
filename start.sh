@@ -107,60 +107,100 @@ except Exception as e:
     fi
 }
 
-# Function to cleanup previous bot instances
+# Function to aggressively cleanup all competing instances
 cleanup_previous_instances() {
-    echo "🧹 Cleaning up previous bot instances..."
+    echo "🧹 Aggressively cleaning up ALL competing instances..."
     
-    # Method 1: Try pkill if available
+    # Generate unique cleanup session ID
+    CLEANUP_ID="cleanup-$(date +%s)-$$"
+    echo "🆔 Cleanup Session: $CLEANUP_ID"
+    
+    # Method 1: Kill ALL Python processes (nuclear option)
+    echo "🔥 NUCLEAR: Killing ALL Python processes that might be bots..."
     if command -v pkill >/dev/null 2>&1; then
-        echo "🔍 Using pkill to find and terminate bot processes..."
-        pkill -f "python.*src.bot.main" 2>/dev/null || true
-        pkill -f "python.*main.py" 2>/dev/null || true
-        pkill -f "creative.*bot" 2>/dev/null || true
-        sleep 2
-        # Force kill if still running
-        pkill -9 -f "python.*src.bot.main" 2>/dev/null || true
-        pkill -9 -f "python.*main.py" 2>/dev/null || true
-        pkill -9 -f "creative.*bot" 2>/dev/null || true
+        # Kill by pattern with increasing aggressiveness
+        pkill -f "python.*src" 2>/dev/null || true
+        pkill -f "python.*bot" 2>/dev/null || true
+        pkill -f "python.*main" 2>/dev/null || true
+        pkill -f "python.*creative" 2>/dev/null || true
+        pkill -f "aiogram" 2>/dev/null || true
+        sleep 3
+        
+        # Force kill anything that survived
+        pkill -9 -f "python.*src" 2>/dev/null || true
+        pkill -9 -f "python.*bot" 2>/dev/null || true
+        pkill -9 -f "python.*main" 2>/dev/null || true
+        pkill -9 -f "python.*creative" 2>/dev/null || true
+        pkill -9 -f "aiogram" 2>/dev/null || true
+        
+        echo "✅ pkill cleanup completed"
     fi
     
-    # Method 2: Use ps and kill (works in most containers)
-    echo "🔍 Using ps/kill to cleanup remaining processes..."
+    # Method 2: ps + kill with extended patterns
+    echo "🔍 Extended ps/kill cleanup..."
     if command -v ps >/dev/null 2>&1; then
-        # Find Python processes related to the bot
-        PIDS=$(ps aux 2>/dev/null | grep -E "python.*src\.bot\.main|python.*main\.py|python.*creative.*bot" | grep -v grep | awk '{print $2}' || true)
+        # Find ALL potentially conflicting processes
+        PIDS=$(ps aux 2>/dev/null | grep -E "python|gunicorn|uvicorn" | grep -E "src|bot|main|creative|aiogram|telegram" | grep -v grep | grep -v "$CLEANUP_ID" | awk '{print $2}' || true)
         if [ ! -z "$PIDS" ]; then
-            echo "🎯 Found processes to kill: $PIDS"
+            echo "🎯 Found potentially conflicting processes: $PIDS"
             echo "$PIDS" | xargs -r kill -TERM 2>/dev/null || true
-            sleep 2
+            sleep 5
             echo "$PIDS" | xargs -r kill -9 2>/dev/null || true
+            echo "✅ Extended ps/kill completed"
         else
-            echo "👍 No bot processes found"
+            echo "👍 No conflicting processes found"
         fi
     fi
     
-    # Method 3: Try to find Python processes using different approaches
-    echo "🔍 Final cleanup check..."
+    # Method 3: Port-based cleanup (kill anything on our ports)
+    echo "🔍 Port-based cleanup..."
+    PORTS="8000 8081 10000"
+    for port in $PORTS; do
+        if command -v lsof >/dev/null 2>&1; then
+            PORT_PIDS=$(lsof -ti:$port 2>/dev/null || true)
+            if [ ! -z "$PORT_PIDS" ]; then
+                echo "🎯 Killing processes on port $port: $PORT_PIDS"
+                echo "$PORT_PIDS" | xargs -r kill -9 2>/dev/null || true
+            fi
+        fi
+        
+        # Also try netstat approach
+        if command -v netstat >/dev/null 2>&1; then
+            NETSTAT_PIDS=$(netstat -tlnp 2>/dev/null | grep ":$port " | awk '{print $7}' | cut -d'/' -f1 | grep -v '-' || true)
+            if [ ! -z "$NETSTAT_PIDS" ]; then
+                echo "🎯 Killing processes on port $port (netstat): $NETSTAT_PIDS"
+                echo "$NETSTAT_PIDS" | xargs -r kill -9 2>/dev/null || true
+            fi
+        fi
+    done
+    
+    # Method 4: Memory cleanup
+    echo "🔍 Memory cleanup..."
     if command -v pgrep >/dev/null 2>&1; then
-        PYTHON_PIDS=$(pgrep -f "python.*bot" 2>/dev/null || true)
-        if [ ! -z "$PYTHON_PIDS" ]; then
-            echo "🎯 Found remaining Python bot processes: $PYTHON_PIDS"
-            echo "$PYTHON_PIDS" | xargs -r kill -9 2>/dev/null || true
+        # Kill any remaining Python processes
+        ALL_PYTHON_PIDS=$(pgrep python 2>/dev/null | grep -v $$ || true)
+        if [ ! -z "$ALL_PYTHON_PIDS" ]; then
+            echo "🎯 Final Python cleanup: $ALL_PYTHON_PIDS"
+            echo "$ALL_PYTHON_PIDS" | xargs -r kill -9 2>/dev/null || true
         fi
     fi
     
-    # Extra safety: kill any process listening on our expected ports
-    if command -v lsof >/dev/null 2>&1; then
-        echo "🔍 Checking for processes on port 8000..."
-        PORT_PIDS=$(lsof -ti:8000 2>/dev/null || true)
-        if [ ! -z "$PORT_PIDS" ]; then
-            echo "🎯 Found processes on port 8000: $PORT_PIDS"
-            echo "$PORT_PIDS" | xargs -r kill -9 2>/dev/null || true
+    # Method 5: Container-specific cleanup
+    echo "🔍 Container-specific cleanup..."
+    # Clear any zombie processes
+    if command -v ps >/dev/null 2>&1; then
+        ZOMBIES=$(ps aux | awk '$8 ~ /^Z/ {print $2}' || true)
+        if [ ! -z "$ZOMBIES" ]; then
+            echo "🧟 Cleaning zombie processes: $ZOMBIES"
+            echo "$ZOMBIES" | xargs -r kill -9 2>/dev/null || true
         fi
     fi
     
-    sleep 1
-    echo "✅ Previous instances cleaned up"
+    # Extended wait to ensure everything is dead
+    echo "⏳ Extended wait for process cleanup (15 seconds)..."
+    sleep 15
+    
+    echo "✅ AGGRESSIVE cleanup completed for session $CLEANUP_ID"
 }
 
 # Function to check if this is a duplicate service
@@ -442,7 +482,7 @@ main() {
     # Step 2: Clean up any previous instances first
     cleanup_previous_instances
     
-    # Step 3: Clean Telegram API state properly
+    # Step 3: Clean Telegram API state properly (simplified - main logic in Python)
     clean_telegram_state
     
     # Step 4: Give Telegram API extra time to process webhook reset
