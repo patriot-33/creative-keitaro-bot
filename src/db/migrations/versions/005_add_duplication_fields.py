@@ -1,7 +1,7 @@
 """Add duplication tracking fields
 
-Revision ID: 003
-Revises: 002
+Revision ID: 005
+Revises: 004_custom_name_field
 Create Date: 2024-12-19
 """
 from alembic import op
@@ -10,8 +10,8 @@ from sqlalchemy.sql import expression
 
 
 # revision identifiers
-revision = '003'
-down_revision = '002'
+revision = '005'
+down_revision = '004_custom_name_field'
 branch_labels = None
 depends_on = None
 
