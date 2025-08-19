@@ -81,11 +81,22 @@ class SubscriptionChecker:
         try:
             chat = await bot.get_chat(settings.required_channel_id)
             
+            # Получаем invite_link если его нет в chat объекте
+            invite_link = chat.invite_link
+            if not invite_link:
+                try:
+                    # Пытаемся экспортировать invite link
+                    invite_link = await bot.export_chat_invite_link(settings.required_channel_id)
+                    logger.info(f"🔗 Generated invite link for channel {settings.required_channel_id}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not generate invite link for channel {settings.required_channel_id}: {e}")
+                    invite_link = None
+            
             return {
                 'id': chat.id,
                 'title': chat.title or 'Канал',
                 'username': chat.username,
-                'invite_link': chat.invite_link
+                'invite_link': invite_link
             }
             
         except Exception as e:
@@ -93,20 +104,35 @@ class SubscriptionChecker:
             return None
 
     @staticmethod
-    def get_channel_link() -> Optional[str]:
+    async def get_channel_link(bot: Bot) -> Optional[str]:
         """
         Возвращает ссылку на канал для подписки
         
+        Args:
+            bot: Экземпляр бота для получения актуальной ссылки
+            
         Returns:
             str: Ссылка на канал или None если не настроено
         """
         
         if not settings.required_channel_id:
             return None
+        
+        # Сначала проверяем есть ли заданная вручную ссылка
+        if hasattr(settings, 'required_channel_invite_link') and settings.required_channel_invite_link:
+            logger.info(f"🔗 Using configured invite link for channel {settings.required_channel_id}")
+            return settings.required_channel_invite_link
+        
+        # Получаем актуальную информацию о канале включая invite_link
+        channel_info = await SubscriptionChecker.get_channel_info(bot)
+        
+        if channel_info and channel_info.get('invite_link'):
+            return channel_info['invite_link']
             
         # Если есть username канала, используем его
         if hasattr(settings, 'required_channel_username') and settings.required_channel_username:
             return f"https://t.me/{settings.required_channel_username.lstrip('@')}"
-            
-        # Иначе используем числовой ID
-        return f"https://t.me/c/{str(settings.required_channel_id).lstrip('-100')}/1"
+        
+        # Если ничего не получилось, возвращаем None
+        logger.warning(f"⚠️ Could not generate valid link for channel {settings.required_channel_id}")
+        return None

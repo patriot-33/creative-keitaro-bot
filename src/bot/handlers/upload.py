@@ -155,9 +155,10 @@ async def cmd_upload(message: Message, state: FSMContext):
             
             # Получаем информацию о канале
             channel_info = await SubscriptionChecker.get_channel_info(message.bot)
-            channel_link = SubscriptionChecker.get_channel_link()
+            channel_link = await SubscriptionChecker.get_channel_link(message.bot)
             
             channel_name = channel_info.get('title', 'Канал') if channel_info else 'Канал'
+            logger.info(f"🔗 SUBSCRIPTION: Channel link = {channel_link}")
             
             text = f"""
 🔒 <b>Требуется подписка на канал</b>
@@ -253,7 +254,7 @@ async def handle_geo_selection(callback: CallbackQuery, state: FSMContext):
             
             # Показываем сообщение о подписке
             channel_info = await SubscriptionChecker.get_channel_info(callback.bot)
-            channel_link = SubscriptionChecker.get_channel_link()
+            channel_link = await SubscriptionChecker.get_channel_link(callback.bot)
             
             channel_name = channel_info.get('title', 'Канал') if channel_info else 'Канал'
             
@@ -1257,7 +1258,7 @@ async def handle_check_subscription(callback: CallbackQuery, state: FSMContext):
         
         # Получаем информацию о канале
         channel_info = await SubscriptionChecker.get_channel_info(callback.bot)
-        channel_link = SubscriptionChecker.get_channel_link()
+        channel_link = await SubscriptionChecker.get_channel_link(callback.bot)
         
         channel_name = channel_info.get('title', 'Канал') if channel_info else 'Канал'
         
