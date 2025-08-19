@@ -16,7 +16,7 @@ sys.path.insert(0, str(project_root))
 from core.config import settings
 from db.database import engine
 from db.models import Base
-from bot.handlers import reports, admin, upload, google_auth
+from bot.handlers import reports, admin, upload
 
 # Configure logging with enterprise-level setup
 import os
@@ -119,8 +119,6 @@ logger.info("  - Registering admin router")
 dp.include_router(admin.router)
 logger.info("  - Registering upload router")
 dp.include_router(upload.router)
-logger.info("  - Registering google_auth router")
-dp.include_router(google_auth.router)
 logger.info("All routers registered successfully")
 
 
@@ -203,10 +201,6 @@ async def cmd_start(message: Message):
 📊 <b>Основные команды:</b>
 /reports - 📊 Система отчетов (новая!)
 /upload - Загрузить креатив
-/google_auth - 🔐 Авторизация Google Drive
-/stats_creo - Статистика креативов
-/stats_buyer - Статистика по баерам
-/stats_geo_offer - Статистика GEO/офферов
 /my_creos - Мои креативы
 /export - 📊 Экспорт в Google Таблицы
 /help - Помощь{admin_commands}
@@ -228,18 +222,6 @@ async def cmd_help(message: Message):
   • Поддерживаются: JPG, PNG, MP4, MOV
   • Максимальный размер: 50 МБ
   • Автоматическая генерация ID
-
-/stats_creo - Статистика по креативам
-  • Фильтры: период, GEO, оффер, баер
-  • Показатели: клики, регистрации, депозиты
-
-/stats_buyer - Статистика по баерам
-  • Агрегированные данные по баерам
-  • Топ креативы каждого баера
-
-/stats_geo_offer - Статистика по GEO и офферам
-  • Срезы по странам
-  • Эффективность офферов
 
 /my_creos - Ваши последние креативы
   • Последние 20 загруженных креативов

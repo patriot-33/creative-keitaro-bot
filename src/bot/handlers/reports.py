@@ -631,64 +631,8 @@ async def handle_buyers_offers_report(callback: CallbackQuery, state: FSMContext
 
 # Добавленные команды
 
-@router.message(Command("stats_creo"))
-async def cmd_stats_creo(message: Message):
-    """Статистика по конкретному креативу"""
-    from bot.services.creatives import CreativesService
-    
-    # Проверяем, указан ли ID креатива в команде
-    command_parts = message.text.split()
-    
-    if len(command_parts) == 1:
-        # ID не указан, показываем инструкцию
-        await message.answer(
-            "📊 <b>Статистика креативов</b>\n\n"
-            "Отправьте ID креатива для получения статистики:\n"
-            "<code>/stats_creo IDAZ090825001</code>\n\n"
-            "Формат ID: IDGEOДДММГГNNN\n"
-            "• ID - префикс\n"
-            "• GEO - страна (AZ, TR, US, и т.д.)\n"
-            "• ДДММГГ - дата\n"
-            "• NNN - номер",
-            parse_mode="HTML"
-        )
-        return
-    
-    creative_id = command_parts[1].upper()
-    
-    # Ищем креатив в базе данных
-    creative = await CreativesService.get_creative_by_id(creative_id)
-    
-    if not creative:
-        await message.answer(
-            f"❌ <b>Креатив не найден</b>\n\n"
-            f"Креатив с ID <code>{creative_id}</code> не найден в базе данных.\n\n"
-            f"Проверьте правильность написания ID или используйте /my_creos для просмотра ваших креативов.",
-            parse_mode="HTML"
-        )
-        return
-    
-    # Показываем информацию о креативе
-    response = f"📊 <b>Статистика креатива</b>\n\n"
-    response += CreativesService.format_creative_info(creative)
-    response += "\n🚧 <b>Статистика по кликам/конверсиям</b>\n"
-    response += "Интеграция со статистикой Keitaro будет добавлена в следующей версии."
-    
-    await message.answer(response, parse_mode="HTML", disable_web_page_preview=True)
 
 
-@router.message(Command("stats_geo_offer"))
-async def cmd_stats_geo_offer(message: Message):
-    """Статистика по GEO и офферам"""
-    await message.answer(
-        "🌍 <b>Статистика GEO/офферов</b>\n\n"
-        "🚧 Функция в разработке\n\n"
-        "Будет доступна статистика по:\n"
-        "• Географическим регионам\n"
-        "• Офферам и их конверсии\n"
-        "• Доходности по странам",
-        parse_mode="HTML"
-    )
 
 
 @router.message(Command("my_creos"))
@@ -790,18 +734,6 @@ async def handle_get_creative(message: Message):
         )
 
 
-@router.message(Command("stats_buyer"))
-async def cmd_stats_buyer(message: Message):
-    """Статистика по байерам"""
-    await message.answer(
-        "👥 <b>Статистика байеров</b>\n\n"
-        "Используйте /reports для доступа к полной системе отчетов по байерам.\n\n"
-        "Доступные отчеты:\n"
-        "• Отчет по всем байерам\n"
-        "• Фильтрация по источникам трафика\n"
-        "• Детальная статистика по периодам",
-        parse_mode="HTML"
-    )
 
 
 @router.message(Command("export"))
