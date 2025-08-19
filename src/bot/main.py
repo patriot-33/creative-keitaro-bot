@@ -506,6 +506,12 @@ async def on_startup():
         logger.warning(f"Database initialization failed: {e}")
         logger.info("Bot will continue without database features")
     
+    # Log subscription requirement status
+    if settings.required_channel_id:
+        logger.info(f"🔒 SUBSCRIPTION REQUIREMENT: Enabled for channel {settings.required_channel_id}")
+    else:
+        logger.info("🔒 SUBSCRIPTION REQUIREMENT: Disabled (no channel configured)")
+    
     logger.info("Bot started successfully!")
 
 

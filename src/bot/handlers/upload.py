@@ -144,10 +144,15 @@ async def cmd_upload(message: Message, state: FSMContext):
     # Проверка подписки на обязательный канал
     from bot.services.subscription_checker import SubscriptionChecker
     
+    logger.info(f"🔒 SUBSCRIPTION CHECK: Channel ID = {settings.required_channel_id}")
+    
     if settings.required_channel_id:
+        logger.info(f"🔍 SUBSCRIPTION: Checking subscription for user {user.id} to channel {settings.required_channel_id}")
         is_subscribed = await SubscriptionChecker.is_user_subscribed(message.bot, user.id)
         
         if not is_subscribed:
+            logger.info(f"❌ SUBSCRIPTION: User {user.id} is NOT subscribed to channel {settings.required_channel_id}")
+            
             # Получаем информацию о канале
             channel_info = await SubscriptionChecker.get_channel_info(message.bot)
             channel_link = SubscriptionChecker.get_channel_link()
@@ -180,6 +185,10 @@ async def cmd_upload(message: Message, state: FSMContext):
             
             await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
             return
+        else:
+            logger.info(f"✅ SUBSCRIPTION: User {user.id} is subscribed to channel {settings.required_channel_id}")
+    else:
+        logger.info("🔒 SUBSCRIPTION: No required channel configured, skipping check")
     
     await state.set_state(UploadStates.waiting_geo)
     
@@ -235,9 +244,11 @@ async def handle_geo_selection(callback: CallbackQuery, state: FSMContext):
     from bot.services.subscription_checker import SubscriptionChecker
     
     if settings.required_channel_id:
+        logger.info(f"🔍 SUBSCRIPTION CALLBACK: Checking subscription for user {user.id} to channel {settings.required_channel_id}")
         is_subscribed = await SubscriptionChecker.is_user_subscribed(callback.bot, user.id)
         
         if not is_subscribed:
+            logger.info(f"❌ SUBSCRIPTION CALLBACK: User {user.id} is NOT subscribed to channel {settings.required_channel_id}")
             await callback.answer("❌ Требуется подписка на канал", show_alert=True)
             
             # Показываем сообщение о подписке
@@ -1201,11 +1212,14 @@ async def handle_check_subscription(callback: CallbackQuery, state: FSMContext):
     
     user = callback.from_user
     
+    logger.info(f"🔄 SUBSCRIPTION RECHECK: User {user.id} requested subscription recheck")
+    
     # Проверяем подписку
     is_subscribed = await SubscriptionChecker.is_user_subscribed(callback.bot, user.id)
     
     if is_subscribed:
         # Подписка есть - возвращаем к загрузке
+        logger.info(f"✅ SUBSCRIPTION RECHECK: User {user.id} subscription confirmed")
         await callback.answer("✅ Подписка подтверждена! Теперь вы можете загружать креативы", show_alert=True)
         
         # Возвращаем пользователя к началу процесса загрузки
@@ -1238,6 +1252,7 @@ async def handle_check_subscription(callback: CallbackQuery, state: FSMContext):
         
     else:
         # Подписки нет
+        logger.info(f"❌ SUBSCRIPTION RECHECK: User {user.id} subscription NOT found")
         await callback.answer("❌ Подписка не найдена. Пожалуйста, подпишитесь на канал и повторите проверку", show_alert=True)
         
         # Получаем информацию о канале
