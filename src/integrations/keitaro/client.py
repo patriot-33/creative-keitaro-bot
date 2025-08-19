@@ -117,72 +117,42 @@ class KeitaroClient:
             end_date = custom_end
         else:
             # For standard periods
-            if period in [ReportPeriod.TODAY, ReportPeriod.YESTERDAY]:
-                from datetime import datetime, timedelta
-                
-                if period == ReportPeriod.TODAY:
-                    date = datetime.now()
-                    # Moscow day boundaries (00:00-23:59) converted to UTC (21:00-20:59)
-                    moscow_start = date.strftime('%Y-%m-%d 00:00:00')
-                    moscow_end = date.strftime('%Y-%m-%d 23:59:59')
-                else:
-                    date = datetime.now() - timedelta(days=1)
-                    # Moscow day boundaries (00:00-23:59) converted to UTC (21:00-20:59)
-                    moscow_start = date.strftime('%Y-%m-%d 00:00:00')
-                    moscow_end = date.strftime('%Y-%m-%d 23:59:59')
-                
-                # Convert to UTC by subtracting 3 hours (as per BUGFIXES.md)
-                moscow_start_dt = datetime.strptime(moscow_start, '%Y-%m-%d %H:%M:%S')
-                moscow_end_dt = datetime.strptime(moscow_end, '%Y-%m-%d %H:%M:%S')
-                utc_start_dt = moscow_start_dt - timedelta(hours=3)
-                utc_end_dt = moscow_end_dt - timedelta(hours=3)
-                start_date = utc_start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                end_date = utc_end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                
-                logger.info(f"get_stats_by_buyers period {period.value}: {start_date} - {end_date} (UTC)")
+            # Use Moscow time directly for all periods
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            
+            if period == ReportPeriod.TODAY:
+                start_date = now.strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.YESTERDAY:
+                yesterday = now - timedelta(days=1)
+                start_date = yesterday.strftime('%Y-%m-%d 00:00:00')
+                end_date = yesterday.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.LAST_24H:
+                start_date = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
+                end_date = now.strftime('%Y-%m-%d %H:%M:%S')
+            elif period == ReportPeriod.LAST_3D:
+                start_date = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.LAST_7D:
+                start_date = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.LAST_30D:
+                start_date = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.THIS_MONTH:
+                start_date = now.replace(day=1).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.LAST_MONTH:
+                first_day_this_month = now.replace(day=1)
+                last_month = first_day_this_month - timedelta(days=1)
+                start_date = last_month.replace(day=1).strftime('%Y-%m-%d 00:00:00')
+                end_date = last_month.strftime('%Y-%m-%d 23:59:59')
             else:
-                # For other periods, calculate dates
-                from datetime import datetime, timedelta
-                now = datetime.now()
-                
-                if period == ReportPeriod.LAST_24H:
-                    # For 24h use current time without conversion (already relative)
-                    start_date = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
-                    end_date = now.strftime('%Y-%m-%d %H:%M:%S')
-                elif period == ReportPeriod.LAST_3D:
-                    # Convert Moscow boundaries to UTC (Last 3 days)
-                    start_moscow = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
-                    end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                    start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                elif period == ReportPeriod.LAST_7D:
-                    # Последние 7 дней включая сегодня (6 дней назад + сегодня = 7 дней)
-                    # Convert Moscow boundaries to UTC (Last 7 days)
-                    start_moscow = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
-                    end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                    start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                elif period == ReportPeriod.LAST_30D:
-                    # Convert Moscow boundaries to UTC (Last 30 days)
-                    start_moscow = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
-                    end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                    start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                else:
-                    # Default to yesterday with UTC conversion
-                    yesterday = now - timedelta(days=1)
-                    start_moscow = yesterday.strftime('%Y-%m-%d 00:00:00')
-                    end_moscow = yesterday.strftime('%Y-%m-%d 23:59:59')
-                    start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                # Default to yesterday
+                yesterday = now - timedelta(days=1)
+                start_date = yesterday.strftime('%Y-%m-%d 00:00:00')
+                end_date = yesterday.strftime('%Y-%m-%d 23:59:59')
         
         # Build report request
         report_params = {
@@ -438,85 +408,42 @@ class KeitaroClient:
             start_date = custom_start
             end_date = custom_end
         else:
-            # For standard periods
-            if period in [ReportPeriod.TODAY, ReportPeriod.YESTERDAY]:
-                from datetime import datetime, timedelta
-                
-                if period == ReportPeriod.TODAY:
-                    date = datetime.now()
-                else:
-                    date = datetime.now() - timedelta(days=1)
-                
-                # Use full calendar days for accurate reporting
-                # Convert Moscow time boundaries to UTC for API (Moscow is UTC+3)
-                if period == ReportPeriod.YESTERDAY:
-                    yesterday = datetime.now() - timedelta(days=1)
-                    # Moscow day boundaries (00:00-23:59) converted to UTC (21:00-20:59)
-                    moscow_start = yesterday.strftime('%Y-%m-%d 00:00:00')
-                    moscow_end = yesterday.strftime('%Y-%m-%d 23:59:59')
-                    # Convert to UTC by subtracting 3 hours
-                    moscow_start_dt = datetime.strptime(moscow_start, '%Y-%m-%d %H:%M:%S')
-                    moscow_end_dt = datetime.strptime(moscow_end, '%Y-%m-%d %H:%M:%S')
-                    utc_start_dt = moscow_start_dt - timedelta(hours=3)
-                    utc_end_dt = moscow_end_dt - timedelta(hours=3)
-                    start_date = utc_start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    end_date = utc_end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                else:  # TODAY
-                    today = datetime.now()
-                    # Moscow day boundaries (00:00-23:59) converted to UTC (21:00-20:59)
-                    moscow_start = today.strftime('%Y-%m-%d 00:00:00')
-                    moscow_end = today.strftime('%Y-%m-%d 23:59:59')
-                    # Convert to UTC by subtracting 3 hours
-                    moscow_start_dt = datetime.strptime(moscow_start, '%Y-%m-%d %H:%M:%S')
-                    moscow_end_dt = datetime.strptime(moscow_end, '%Y-%m-%d %H:%M:%S')
-                    utc_start_dt = moscow_start_dt - timedelta(hours=3)
-                    utc_end_dt = moscow_end_dt - timedelta(hours=3)
-                    start_date = utc_start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    end_date = utc_end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                
-                logger.info(f"Using calendar day boundaries for conversions: {start_date} - {end_date} (UTC)")
+            # Use Moscow time directly for all periods
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            
+            if period == ReportPeriod.TODAY:
+                start_date = now.strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.YESTERDAY:
+                yesterday = now - timedelta(days=1)
+                start_date = yesterday.strftime('%Y-%m-%d 00:00:00')
+                end_date = yesterday.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.LAST_24H:
+                start_date = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
+                end_date = now.strftime('%Y-%m-%d %H:%M:%S')
+            elif period == ReportPeriod.LAST_3D:
+                start_date = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.LAST_7D:
+                start_date = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.LAST_30D:
+                start_date = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.THIS_MONTH:
+                start_date = now.replace(day=1).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.LAST_MONTH:
+                first_day_this_month = now.replace(day=1)
+                last_month = first_day_this_month - timedelta(days=1)
+                start_date = last_month.replace(day=1).strftime('%Y-%m-%d 00:00:00')
+                end_date = last_month.strftime('%Y-%m-%d 23:59:59')
             else:
-                # For other periods, calculate dates with UTC conversion
-                from datetime import datetime, timedelta
-                now = datetime.now()
-                
-                if period == ReportPeriod.LAST_24H:
-                    # For 24h use current time without conversion (already relative)
-                    start_date = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
-                    end_date = now.strftime('%Y-%m-%d %H:%M:%S')
-                elif period == ReportPeriod.LAST_3D:
-                    # Convert Moscow boundaries to UTC (Last 3 days)
-                    start_moscow = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
-                    end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                    start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                elif period == ReportPeriod.LAST_7D:
-                    # Последние 7 дней включая сегодня (6 дней назад + сегодня = 7 дней)
-                    # Convert Moscow boundaries to UTC (Last 7 days)
-                    start_moscow = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
-                    end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                    start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                elif period == ReportPeriod.LAST_30D:
-                    # Convert Moscow boundaries to UTC (Last 30 days)
-                    start_moscow = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
-                    end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                    start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                else:
-                    # Default to yesterday with UTC conversion
-                    start_moscow = (now - timedelta(days=1)).strftime('%Y-%m-%d 00:00:00')
-                    end_moscow = (now - timedelta(days=1)).strftime('%Y-%m-%d 23:59:59')
-                    start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                    start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                # Default to yesterday
+                yesterday = now - timedelta(days=1)
+                start_date = yesterday.strftime('%Y-%m-%d 00:00:00')
+                end_date = yesterday.strftime('%Y-%m-%d 23:59:59')
         
         # Get conversions data using POST method with proper JSON payload
         payload = {
@@ -689,68 +616,41 @@ class KeitaroClient:
                 start_date = custom_start
                 end_date = custom_end
             else:
-                if period in [ReportPeriod.TODAY, ReportPeriod.YESTERDAY]:
-                    if period == ReportPeriod.TODAY:
-                        date = datetime.now()
-                        # Moscow day boundaries (00:00-23:59) converted to UTC (21:00-20:59)
-                        moscow_start = date.strftime('%Y-%m-%d 00:00:00')
-                        moscow_end = date.strftime('%Y-%m-%d 23:59:59')
-                    else:
-                        date = datetime.now() - timedelta(days=1)
-                        # Moscow day boundaries (00:00-23:59) converted to UTC (21:00-20:59)
-                        moscow_start = date.strftime('%Y-%m-%d 00:00:00')
-                        moscow_end = date.strftime('%Y-%m-%d 23:59:59')
-                    
-                    # Convert to UTC by subtracting 3 hours (as per BUGFIXES.md)
-                    moscow_start_dt = datetime.strptime(moscow_start, '%Y-%m-%d %H:%M:%S')
-                    moscow_end_dt = datetime.strptime(moscow_end, '%Y-%m-%d %H:%M:%S')
-                    utc_start_dt = moscow_start_dt - timedelta(hours=3)
-                    utc_end_dt = moscow_end_dt - timedelta(hours=3)
-                    start_date = utc_start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    end_date = utc_end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    
-                    logger.info(f"get_stats_by_traffic_sources period {period.value}: {start_date} - {end_date} (UTC)")
+                # Use Moscow time directly for all periods
+                now = datetime.now()
+                
+                if period == ReportPeriod.TODAY:
+                    start_date = now.strftime('%Y-%m-%d 00:00:00')
+                    end_date = now.strftime('%Y-%m-%d 23:59:59')
+                elif period == ReportPeriod.YESTERDAY:
+                    yesterday = now - timedelta(days=1)
+                    start_date = yesterday.strftime('%Y-%m-%d 00:00:00')
+                    end_date = yesterday.strftime('%Y-%m-%d 23:59:59')
+                elif period == ReportPeriod.LAST_24H:
+                    start_date = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
+                    end_date = now.strftime('%Y-%m-%d %H:%M:%S')
+                elif period == ReportPeriod.LAST_3D:
+                    start_date = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
+                    end_date = now.strftime('%Y-%m-%d 23:59:59')
+                elif period == ReportPeriod.LAST_7D:
+                    start_date = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
+                    end_date = now.strftime('%Y-%m-%d 23:59:59')
+                elif period == ReportPeriod.LAST_30D:
+                    start_date = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
+                    end_date = now.strftime('%Y-%m-%d 23:59:59')
+                elif period == ReportPeriod.THIS_MONTH:
+                    start_date = now.replace(day=1).strftime('%Y-%m-%d 00:00:00')
+                    end_date = now.strftime('%Y-%m-%d 23:59:59')
+                elif period == ReportPeriod.LAST_MONTH:
+                    first_day_this_month = now.replace(day=1)
+                    last_month = first_day_this_month - timedelta(days=1)
+                    start_date = last_month.replace(day=1).strftime('%Y-%m-%d 00:00:00')
+                    end_date = last_month.strftime('%Y-%m-%d 23:59:59')
                 else:
-                    # For other periods, calculate dates with UTC conversion
-                    now = datetime.now()
-                    if period == ReportPeriod.LAST_24H:
-                        # For 24h use current time without conversion (already relative)
-                        start_date = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
-                        end_date = now.strftime('%Y-%m-%d %H:%M:%S')
-                    elif period == ReportPeriod.LAST_3D:
-                        # Convert Moscow boundaries to UTC (Last 3 days)
-                        start_moscow = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
-                        end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                        start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                        end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    elif period == ReportPeriod.LAST_7D:
-                        # Последние 7 дней включая сегодня (6 дней назад + сегодня = 7 дней)
-                        # Convert Moscow boundaries to UTC (Last 7 days)
-                        start_moscow = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
-                        end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                        start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                        end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    elif period == ReportPeriod.LAST_30D:
-                        # Convert Moscow boundaries to UTC (Last 30 days)
-                        start_moscow = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
-                        end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                        start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                        end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    else:
-                        # Default to yesterday with UTC conversion
-                        yesterday = now - timedelta(days=1)
-                        start_moscow = yesterday.strftime('%Y-%m-%d 00:00:00')
-                        end_moscow = yesterday.strftime('%Y-%m-%d 23:59:59')
-                        start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                        end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                    # Default to yesterday
+                    yesterday = now - timedelta(days=1)
+                    start_date = yesterday.strftime('%Y-%m-%d 00:00:00')
+                    end_date = yesterday.strftime('%Y-%m-%d 23:59:59')
 
             # Use provided traffic source filter
             traffic_source_filter = traffic_source_ids or []
@@ -862,68 +762,41 @@ class KeitaroClient:
                 start_date = custom_start
                 end_date = custom_end
             else:
-                if period in [ReportPeriod.TODAY, ReportPeriod.YESTERDAY]:
-                    if period == ReportPeriod.TODAY:
-                        date = datetime.now()
-                        # Moscow day boundaries (00:00-23:59) converted to UTC (21:00-20:59)
-                        moscow_start = date.strftime('%Y-%m-%d 00:00:00')
-                        moscow_end = date.strftime('%Y-%m-%d 23:59:59')
-                    else:
-                        date = datetime.now() - timedelta(days=1)
-                        # Moscow day boundaries (00:00-23:59) converted to UTC (21:00-20:59)
-                        moscow_start = date.strftime('%Y-%m-%d 00:00:00')
-                        moscow_end = date.strftime('%Y-%m-%d 23:59:59')
-                    
-                    # Convert to UTC by subtracting 3 hours (as per BUGFIXES.md)
-                    moscow_start_dt = datetime.strptime(moscow_start, '%Y-%m-%d %H:%M:%S')
-                    moscow_end_dt = datetime.strptime(moscow_end, '%Y-%m-%d %H:%M:%S')
-                    utc_start_dt = moscow_start_dt - timedelta(hours=3)
-                    utc_end_dt = moscow_end_dt - timedelta(hours=3)
-                    start_date = utc_start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    end_date = utc_end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    
-                    logger.info(f"get_stats_by_creatives period {period.value}: {start_date} - {end_date} (UTC)")
+                # Use Moscow time directly for all periods
+                now = datetime.now()
+                
+                if period == ReportPeriod.TODAY:
+                    start_date = now.strftime('%Y-%m-%d 00:00:00')
+                    end_date = now.strftime('%Y-%m-%d 23:59:59')
+                elif period == ReportPeriod.YESTERDAY:
+                    yesterday = now - timedelta(days=1)
+                    start_date = yesterday.strftime('%Y-%m-%d 00:00:00')
+                    end_date = yesterday.strftime('%Y-%m-%d 23:59:59')
+                elif period == ReportPeriod.LAST_24H:
+                    start_date = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
+                    end_date = now.strftime('%Y-%m-%d %H:%M:%S')
+                elif period == ReportPeriod.LAST_3D:
+                    start_date = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
+                    end_date = now.strftime('%Y-%m-%d 23:59:59')
+                elif period == ReportPeriod.LAST_7D:
+                    start_date = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
+                    end_date = now.strftime('%Y-%m-%d 23:59:59')
+                elif period == ReportPeriod.LAST_30D:
+                    start_date = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
+                    end_date = now.strftime('%Y-%m-%d 23:59:59')
+                elif period == ReportPeriod.THIS_MONTH:
+                    start_date = now.replace(day=1).strftime('%Y-%m-%d 00:00:00')
+                    end_date = now.strftime('%Y-%m-%d 23:59:59')
+                elif period == ReportPeriod.LAST_MONTH:
+                    first_day_this_month = now.replace(day=1)
+                    last_month = first_day_this_month - timedelta(days=1)
+                    start_date = last_month.replace(day=1).strftime('%Y-%m-%d 00:00:00')
+                    end_date = last_month.strftime('%Y-%m-%d 23:59:59')
                 else:
-                    # For other periods, calculate dates with UTC conversion
-                    now = datetime.now()
-                    if period == ReportPeriod.LAST_24H:
-                        # For 24h use current time without conversion (already relative)
-                        start_date = (now - timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
-                        end_date = now.strftime('%Y-%m-%d %H:%M:%S')
-                    elif period == ReportPeriod.LAST_3D:
-                        # Convert Moscow boundaries to UTC (Last 3 days)
-                        start_moscow = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
-                        end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                        start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                        end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    elif period == ReportPeriod.LAST_7D:
-                        # Последние 7 дней включая сегодня (6 дней назад + сегодня = 7 дней)
-                        # Convert Moscow boundaries to UTC (Last 7 days)
-                        start_moscow = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
-                        end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                        start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                        end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    elif period == ReportPeriod.LAST_30D:
-                        # Convert Moscow boundaries to UTC (Last 30 days)
-                        start_moscow = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
-                        end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                        start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                        end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
-                    else:
-                        # Default to yesterday with UTC conversion
-                        yesterday = now - timedelta(days=1)
-                        start_moscow = yesterday.strftime('%Y-%m-%d 00:00:00')
-                        end_moscow = yesterday.strftime('%Y-%m-%d 23:59:59')
-                        start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                        start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                        end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                    # Default to yesterday
+                    yesterday = now - timedelta(days=1)
+                    start_date = yesterday.strftime('%Y-%m-%d 00:00:00')
+                    end_date = yesterday.strftime('%Y-%m-%d 23:59:59')
 
             # Build report params for creatives (using sub_id as creative identifier)
             report_params = {
@@ -1007,65 +880,39 @@ class KeitaroClient:
             start_date = custom_start
             end_date = custom_end
         else:
-            # Calculate dates based on period with UTC conversion
+            # Use Moscow time directly for all periods
             from datetime import datetime, timedelta
             now = datetime.now()
             
             if period == ReportPeriod.TODAY:
-                # Moscow day boundaries (00:00-23:59) converted to UTC (21:00-20:59)
-                moscow_start = now.strftime('%Y-%m-%d 00:00:00')
-                moscow_end = now.strftime('%Y-%m-%d 23:59:59')
-                # Convert to UTC by subtracting 3 hours
-                moscow_start_dt = datetime.strptime(moscow_start, '%Y-%m-%d %H:%M:%S')
-                moscow_end_dt = datetime.strptime(moscow_end, '%Y-%m-%d %H:%M:%S')
-                utc_start_dt = moscow_start_dt - timedelta(hours=3)
-                utc_end_dt = moscow_end_dt - timedelta(hours=3)
-                start_date = utc_start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                end_date = utc_end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                start_date = now.strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
             elif period == ReportPeriod.YESTERDAY:
                 yesterday = now - timedelta(days=1)
-                # Moscow day boundaries (00:00-23:59) converted to UTC (21:00-20:59)
-                moscow_start = yesterday.strftime('%Y-%m-%d 00:00:00')
-                moscow_end = yesterday.strftime('%Y-%m-%d 23:59:59')
-                # Convert to UTC by subtracting 3 hours
-                moscow_start_dt = datetime.strptime(moscow_start, '%Y-%m-%d %H:%M:%S')
-                moscow_end_dt = datetime.strptime(moscow_end, '%Y-%m-%d %H:%M:%S')
-                utc_start_dt = moscow_start_dt - timedelta(hours=3)
-                utc_end_dt = moscow_end_dt - timedelta(hours=3)
-                start_date = utc_start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                end_date = utc_end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                start_date = yesterday.strftime('%Y-%m-%d 00:00:00')
+                end_date = yesterday.strftime('%Y-%m-%d 23:59:59')
             elif period == ReportPeriod.LAST_3D:
-                # Convert Moscow boundaries to UTC (Last 3 days)
-                start_moscow = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
-                end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                start_date = (now - timedelta(days=3)).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
             elif period == ReportPeriod.LAST_7D:
-                # Последние 7 дней - от 7 дней назад до сегодня (включительно)
-                # FIXED: Use Moscow time directly (no UTC conversion) to match CSV export
                 start_date = (now - timedelta(days=6)).strftime('%Y-%m-%d 00:00:00')
                 end_date = now.strftime('%Y-%m-%d 23:59:59')
-                logger.info(f"LAST_7D period: {start_date} to {end_date} (last 7 days including today, Moscow time)")
-                logger.info(f"🔄 TIMEZONE FIX: Using Moscow time directly to match CSV export period")
             elif period == ReportPeriod.LAST_30D:
-                # Convert Moscow boundaries to UTC (Last 30 days)
-                start_moscow = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
-                end_moscow = now.strftime('%Y-%m-%d 23:59:59')
-                start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                start_date = (now - timedelta(days=30)).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.THIS_MONTH:
+                start_date = now.replace(day=1).strftime('%Y-%m-%d 00:00:00')
+                end_date = now.strftime('%Y-%m-%d 23:59:59')
+            elif period == ReportPeriod.LAST_MONTH:
+                first_day_this_month = now.replace(day=1)
+                last_month = first_day_this_month - timedelta(days=1)
+                start_date = last_month.replace(day=1).strftime('%Y-%m-%d 00:00:00')
+                end_date = last_month.strftime('%Y-%m-%d 23:59:59')
             else:
-                # Default to yesterday with UTC conversion
+                # Default to yesterday
                 yesterday = now - timedelta(days=1)
-                start_moscow = yesterday.strftime('%Y-%m-%d 00:00:00')
-                end_moscow = yesterday.strftime('%Y-%m-%d 23:59:59')
-                start_dt = datetime.strptime(start_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                end_dt = datetime.strptime(end_moscow, '%Y-%m-%d %H:%M:%S') - timedelta(hours=3)
-                start_date = start_dt.strftime('%Y-%m-%d %H:%M:%S')
-                end_date = end_dt.strftime('%Y-%m-%d %H:%M:%S')
+                start_date = yesterday.strftime('%Y-%m-%d 00:00:00')
+                end_date = yesterday.strftime('%Y-%m-%d 23:59:59')
         
         try:
             logger.info(f"=== KEITARO CREATIVES REPORT (FIXED) ===")
