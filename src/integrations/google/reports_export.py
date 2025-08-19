@@ -331,16 +331,16 @@ class GoogleSheetsReportsExporter:
                     creative.get('unique_clicks', 0),  # Use unique_clicks instead of clicks
                     registrations,
                     deposits,
-                    f"{creative.get('revenue', 0):.1f}".replace('.', ','),  # Format like CSV with comma separator
+                    round(creative.get('revenue', 0), 1),  # Send as number, not string
                     dep_reg_percent,
-                    f"{creative.get('uepc', 0):.2f}".replace('.', ','),  # Format like CSV with comma separator
+                    round(creative.get('uepc', 0), 2),  # Send as number, not string
                     creative.get('active_days', 1),
                     "Ссылка"  # Placeholder for creative link
                 ]
                 all_rows.append(row)
             
-            # Write all data to sheet
-            worksheet.update("A1", all_rows)
+            # Write all data to sheet with USER_ENTERED option to parse numbers correctly
+            worksheet.update("A1", all_rows, value_input_option='USER_ENTERED')
             
             # Format header info
             worksheet.format("A1:A3", {
@@ -353,6 +353,26 @@ class GoogleSheetsReportsExporter:
                 "backgroundColor": {"red": 0.2, "green": 0.6, "blue": 0.9},
                 "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
                 "horizontalAlignment": "CENTER"
+            })
+            
+            # Format number columns to use comma as decimal separator
+            data_start_row = len(header_info) + 2  # First data row after headers
+            data_end_row = len(all_rows)
+            
+            # Format revenue column (column G = index 6)
+            worksheet.format(f"G{data_start_row}:G{data_end_row}", {
+                "numberFormat": {
+                    "type": "NUMBER",
+                    "pattern": "#,##0.0"
+                }
+            })
+            
+            # Format uEPC column (column I = index 8)
+            worksheet.format(f"I{data_start_row}:I{data_end_row}", {
+                "numberFormat": {
+                    "type": "NUMBER",
+                    "pattern": "#,##0.00"
+                }
             })
             
             # Auto-resize columns
