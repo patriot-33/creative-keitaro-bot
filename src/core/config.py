@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     # Creative storage settings (канал для хранения креативов)
     creative_storage_channel_id: Optional[str] = None
     
+    # Required subscription settings (обязательная подписка)
+    required_channel_id: Optional[str] = None
+    required_channel_username: Optional[str] = None
+    
     @validator("database_url", pre=True, always=True)
     def build_database_url(cls, v, values):
         if v:

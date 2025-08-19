@@ -141,6 +141,46 @@ async def cmd_upload(message: Message, state: FSMContext):
         await message.answer("❌ У вас нет доступа к загрузке креативов.")
         return
     
+    # Проверка подписки на обязательный канал
+    from bot.services.subscription_checker import SubscriptionChecker
+    
+    if settings.required_channel_id:
+        is_subscribed = await SubscriptionChecker.is_user_subscribed(message.bot, user.id)
+        
+        if not is_subscribed:
+            # Получаем информацию о канале
+            channel_info = await SubscriptionChecker.get_channel_info(message.bot)
+            channel_link = SubscriptionChecker.get_channel_link()
+            
+            channel_name = channel_info.get('title', 'Канал') if channel_info else 'Канал'
+            
+            text = f"""
+🔒 <b>Требуется подписка на канал</b>
+
+Для загрузки креативов необходимо подписаться на наш канал:
+📢 <b>{channel_name}</b>
+
+После подписки нажмите кнопку "Проверить подписку" для продолжения.
+"""
+            
+            buttons = []
+            
+            if channel_link:
+                buttons.append([InlineKeyboardButton(
+                    text="📢 Подписаться на канал",
+                    url=channel_link
+                )])
+            
+            buttons.append([InlineKeyboardButton(
+                text="🔄 Проверить подписку",
+                callback_data="check_subscription"
+            )])
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+            
+            await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
+            return
+    
     await state.set_state(UploadStates.waiting_geo)
     
     # Получаем все ГЕО в алфавитном порядке
@@ -189,6 +229,50 @@ async def cmd_upload(message: Message, state: FSMContext):
 @router.callback_query(F.data.startswith("geo_"))
 async def handle_geo_selection(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора ГЕО"""
+    user = callback.from_user
+    
+    # Дополнительная проверка подписки
+    from bot.services.subscription_checker import SubscriptionChecker
+    
+    if settings.required_channel_id:
+        is_subscribed = await SubscriptionChecker.is_user_subscribed(callback.bot, user.id)
+        
+        if not is_subscribed:
+            await callback.answer("❌ Требуется подписка на канал", show_alert=True)
+            
+            # Показываем сообщение о подписке
+            channel_info = await SubscriptionChecker.get_channel_info(callback.bot)
+            channel_link = SubscriptionChecker.get_channel_link()
+            
+            channel_name = channel_info.get('title', 'Канал') if channel_info else 'Канал'
+            
+            text = f"""
+🔒 <b>Требуется подписка на канал</b>
+
+Для загрузки креативов необходимо подписаться на наш канал:
+📢 <b>{channel_name}</b>
+
+После подписки нажмите кнопку "Проверить подписку" для продолжения.
+"""
+            
+            buttons = []
+            
+            if channel_link:
+                buttons.append([InlineKeyboardButton(
+                    text="📢 Подписаться на канал",
+                    url=channel_link
+                )])
+            
+            buttons.append([InlineKeyboardButton(
+                text="🔄 Проверить подписку",
+                callback_data="check_subscription"
+            )])
+            
+            keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+            
+            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+            return
+    
     geo = callback.data.replace("geo_", "")
     
     all_geos = await get_all_geos()
@@ -1109,6 +1193,84 @@ async def handle_custom_geo_input(message: Message, state: FSMContext):
 async def handle_back_to_geo_selection(callback: CallbackQuery, state: FSMContext):
     """Возврат к выбору ГЕО из добавления нового"""
     await handle_change_geo(callback, state)
+
+@router.callback_query(F.data == "check_subscription")
+async def handle_check_subscription(callback: CallbackQuery, state: FSMContext):
+    """Проверка подписки пользователя на обязательный канал"""
+    from bot.services.subscription_checker import SubscriptionChecker
+    
+    user = callback.from_user
+    
+    # Проверяем подписку
+    is_subscribed = await SubscriptionChecker.is_user_subscribed(callback.bot, user.id)
+    
+    if is_subscribed:
+        # Подписка есть - возвращаем к загрузке
+        await callback.answer("✅ Подписка подтверждена! Теперь вы можете загружать креативы", show_alert=True)
+        
+        # Возвращаем пользователя к началу процесса загрузки
+        await state.clear()
+        
+        # Показываем меню выбора ГЕО
+        all_geos = await get_all_geos()
+        buttons = []
+        for i in range(0, len(all_geos), 4):
+            row = []
+            for geo in all_geos[i:i+4]:
+                row.append(InlineKeyboardButton(text=geo, callback_data=f"geo_{geo}"))
+            buttons.append(row)
+        
+        # Кнопка добавления нового ГЕО
+        buttons.append([InlineKeyboardButton(text="➕ Добавить новое ГЕО", callback_data="add_custom_geo")])
+        buttons.append([InlineKeyboardButton(text="❌ Отменить", callback_data="upload_cancel")])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        
+        await callback.message.edit_text(
+            "🌍 <b>Выберите ГЕО для креатива:</b>\n\n"
+            f"📊 Доступно ГЕО: {len(all_geos)}\n\n"
+            "💡 Если нужного ГЕО нет в списке, вы можете добавить его самостоятельно.",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+        
+        await state.set_state(UploadStates.waiting_geo)
+        
+    else:
+        # Подписки нет
+        await callback.answer("❌ Подписка не найдена. Пожалуйста, подпишитесь на канал и повторите проверку", show_alert=True)
+        
+        # Получаем информацию о канале
+        channel_info = await SubscriptionChecker.get_channel_info(callback.bot)
+        channel_link = SubscriptionChecker.get_channel_link()
+        
+        channel_name = channel_info.get('title', 'Канал') if channel_info else 'Канал'
+        
+        text = f"""
+🔒 <b>Требуется подписка на канал</b>
+
+Для загрузки креативов необходимо подписаться на наш канал:
+📢 <b>{channel_name}</b>
+
+После подписки нажмите кнопку "Проверить подписку" для продолжения.
+"""
+        
+        buttons = []
+        
+        if channel_link:
+            buttons.append([InlineKeyboardButton(
+                text="📢 Подписаться на канал",
+                url=channel_link
+            )])
+        
+        buttons.append([InlineKeyboardButton(
+            text="🔄 Проверить подписку",
+            callback_data="check_subscription"
+        )])
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+        
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
 
 @router.callback_query(F.data == "upload_cancel")
 async def handle_upload_cancel(callback: CallbackQuery, state: FSMContext):
