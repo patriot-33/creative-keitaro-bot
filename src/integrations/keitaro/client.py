@@ -1201,7 +1201,9 @@ class KeitaroClient:
                 if status in ['lead', 'lead_confirmed']:
                     creative_stats[creative_id]['leads'] += 1
                 elif status in ['sale', 'dep', 'dep_confirmed', 'first_dep_confirmed']:
-                    creative_stats[creative_id]['deposits'] += 1
+                    # Only count as deposit if revenue > 0 (exclude technical confirmations with 0 revenue)
+                    if revenue > 0:
+                        creative_stats[creative_id]['deposits'] += 1
                 
                 # Track conversion date for active days
                 postback_datetime = row.get('postback_datetime', '')
