@@ -892,6 +892,68 @@ async def handle_save_creative(callback: CallbackQuery, state: FSMContext):
         
         logger.info(f"Creative {creative_id} saved successfully for user {user.id} (using Telegram storage)")
         
+        # Дублируем креатив в канал хранения
+        try:
+            from bot.services.creative_duplicator import CreativeDuplicatorService
+            
+            # Определяем тип файла для API на основе расширения и MIME type
+            file_type = "document"  # по умолчанию
+            if mime_type.startswith('image/'):
+                if file_ext.lower() == '.gif':
+                    file_type = "animation"
+                else:
+                    file_type = "photo"
+            elif mime_type.startswith('video/'):
+                file_type = "video"
+            
+            # Дублируем с повторными попытками
+            dup_success, dup_message_id, dup_error = await CreativeDuplicatorService.duplicate_with_retry(
+                bot=callback.bot,
+                creative_id=creative_id,
+                file_id=telegram_file_id,
+                file_type=file_type,
+                geo=geo,
+                uploader_name=user.first_name or "Пользователь",
+                uploader_username=user.username,
+                uploader_id=user.id,
+                buyer_id=buyer_id,
+                notes=notes,
+                custom_name=custom_name,
+                file_name=file_name,
+                file_size=file_size
+            )
+            
+            # Обновляем статус дублирования в БД
+            if dup_success:
+                logger.info(f"✅ Креатив {creative_id} успешно продублирован в канал хранения (message_id: {dup_message_id})")
+                
+                # Обновляем запись в БД
+                async with get_db_session() as session:
+                    from sqlalchemy import update
+                    stmt = update(Creative).where(Creative.creative_id == creative_id).values(
+                        is_duplicated=True,
+                        duplicated_at=datetime.utcnow(),
+                        duplication_message_id=dup_message_id
+                    )
+                    await session.execute(stmt)
+                    await session.commit()
+            else:
+                logger.warning(f"⚠️ Не удалось продублировать креатив {creative_id} в creo_storage_bot: {dup_error}")
+                
+                # Сохраняем ошибку в БД
+                async with get_db_session() as session:
+                    from sqlalchemy import update
+                    stmt = update(Creative).where(Creative.creative_id == creative_id).values(
+                        is_duplicated=False,
+                        duplication_error=dup_error[:500] if dup_error else None  # Ограничиваем длину ошибки
+                    )
+                    await session.execute(stmt)
+                    await session.commit()
+                
+        except Exception as dup_error:
+            logger.error(f"❌ Ошибка при дублировании креатива {creative_id}: {dup_error}")
+            # Не прерываем основной процесс из-за ошибки дублирования
+        
         # Формируем информацию о названии
         naming_info = ""
         if custom_name:

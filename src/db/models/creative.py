@@ -1,5 +1,5 @@
 from typing import Optional, TYPE_CHECKING
-from sqlalchemy import String, BigInteger, Date, SmallInteger, ForeignKey, UniqueConstraint, DateTime
+from sqlalchemy import String, BigInteger, Date, SmallInteger, ForeignKey, UniqueConstraint, DateTime, Boolean, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from datetime import datetime
 from .base import Base
@@ -32,6 +32,12 @@ class Creative(Base):
     )
     notes: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     custom_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    
+    # Duplication tracking fields
+    is_duplicated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    duplication_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    duplicated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    duplication_message_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # Relationships
     uploader: Mapped["User"] = relationship(

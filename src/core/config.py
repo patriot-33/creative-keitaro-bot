@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     digest_hour: int = 10
     digest_minute: int = 0
     
+    # Creative storage settings (канал для хранения креативов)
+    creative_storage_channel_id: Optional[str] = None
+    
     @validator("database_url", pre=True, always=True)
     def build_database_url(cls, v, values):
         if v:

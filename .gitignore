@@ -234,6 +234,9 @@ Thumbs.db
 *.md
 !README.md
 !DEPLOYMENT.md
+!CREATIVE_DUPLICATION_SETUP.md
+!CREATIVE_DUPLICATION_SUMMARY.md
+!docs/CREATIVE_DUPLICATION.md
 
 # Configuration backups
 *.ini.bak
